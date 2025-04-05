@@ -1,4 +1,4 @@
-package sqlite
+package ydb
 
 import (
 	"errors"
@@ -6,10 +6,9 @@ import (
 	"io"
 
 	"github.com/antlr4-go/antlr/v4"
-	"github.com/davecgh/go-spew/spew"
-	"github.com/sqlc-dev/sqlc/internal/engine/sqlite/parser"
 	"github.com/sqlc-dev/sqlc/internal/source"
 	"github.com/sqlc-dev/sqlc/internal/sql/ast"
+	parser "github.com/ydb-platform/yql-parsers/go"
 )
 
 type errorListener struct {
@@ -44,47 +43,44 @@ func (p *Parser) Parse(r io.Reader) ([]ast.Statement, error) {
 		return nil, err
 	}
 	input := antlr.NewInputStream(string(blob))
-	lexer := parser.NewSQLiteLexer(input)
+	lexer := parser.NewYQLLexer(input)
 	stream := antlr.NewCommonTokenStream(lexer, 0)
-	pp := parser.NewSQLiteParser(stream)
+	pp := parser.NewYQLParser(stream)
 	el := &errorListener{}
 	pp.AddErrorListener(el)
 	// pp.BuildParseTrees = true
-	tree := pp.Parse()
+	tree := pp.Sql_query()
 	if el.err != "" {
 		return nil, errors.New(el.err)
 	}
-	pctx, ok := tree.(*parser.ParseContext)
+	pctx, ok := tree.(*parser.Sql_queryContext)
 	if !ok {
-		return nil, fmt.Errorf("expected ParserContext; got %T\n", tree)
+		return nil, fmt.Errorf("expected ParserContext; got %T\n ", tree)
 	}
 	var stmts []ast.Statement
-	for _, istmt := range pctx.AllSql_stmt_list() {
-		list, ok := istmt.(*parser.Sql_stmt_listContext)
-		if !ok {
-			return nil, fmt.Errorf("expected Sql_stmt_listContext; got %T\n", istmt)
-		}
+	stmtListCtx := pctx.Sql_stmt_list()
+	if stmtListCtx != nil {
 		loc := 0
-
-		for _, stmt := range list.AllSql_stmt() {
+		for _, stmt := range stmtListCtx.AllSql_stmt() {
 			converter := &cc{}
 			out := converter.convert(stmt)
 			if _, ok := out.(*ast.TODO); ok {
 				loc = stmt.GetStop().GetStop() + 2
 				continue
 			}
-			len := (stmt.GetStop().GetStop() + 1) - loc
-			stmts = append(stmts, ast.Statement{
-				Raw: &ast.RawStmt{
-					Stmt:         out,
-					StmtLocation: loc,
-					StmtLen:      len,
-				},
-			})
-			loc = stmt.GetStop().GetStop() + 2
+			if out != nil {
+				len := (stmt.GetStop().GetStop() + 1) - loc
+				stmts = append(stmts, ast.Statement{
+					Raw: &ast.RawStmt{
+						Stmt:         out,
+						StmtLocation: loc,
+						StmtLen:      len,
+					},
+				})
+				loc = stmt.GetStop().GetStop() + 2
+			}
 		}
 	}
-	spew.Dump(stmts)
 	return stmts, nil
 }
 
