@@ -19,8 +19,7 @@ func TestUpdateErrors(t *testing.T) {
 	}{
 		{
 			`
-			CREATE TABLE foo ();
-			CREATE TABLE foo ();
+			INSERT INTO authors (id, name, bio) VALUES ($1, $2, $3) RETURNING bio;
 			`,
 			sqlerr.RelationExists("foo"),
 		},

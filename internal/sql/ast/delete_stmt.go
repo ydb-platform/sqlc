@@ -7,6 +7,9 @@ type DeleteStmt struct {
 	LimitCount    Node
 	ReturningList *List
 	WithClause    *WithClause
+
+	// YDB specific
+	Batch bool
 }
 
 func (n *DeleteStmt) Pos() int {
@@ -21,6 +24,9 @@ func (n *DeleteStmt) Format(buf *TrackedBuffer) {
 	if n.WithClause != nil {
 		buf.astFormat(n.WithClause)
 		buf.WriteString(" ")
+	}
+	if n.Batch {
+		buf.WriteString("BATCH ")
 	}
 
 	buf.WriteString("DELETE FROM ")
