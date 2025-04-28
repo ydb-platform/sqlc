@@ -1,15 +1,22 @@
 package ast
 
+import (
+	"fmt"
+)
+
 type DeleteStmt struct {
-	Relations     *List
-	UsingClause   *List
-	WhereClause   Node
-	LimitCount    Node
+	Relations   *List
+	UsingClause *List
+	WhereClause Node
+	LimitCount  Node
+
 	ReturningList *List
 	WithClause    *WithClause
 
 	// YDB specific
-	Batch bool
+	Batch        bool
+	OnCols       *List
+	OnSelectStmt Node
 }
 
 func (n *DeleteStmt) Pos() int {
@@ -17,6 +24,7 @@ func (n *DeleteStmt) Pos() int {
 }
 
 func (n *DeleteStmt) Format(buf *TrackedBuffer) {
+	fmt.Println("DeleteStmt.Format")
 	if n == nil {
 		return
 	}
@@ -37,6 +45,20 @@ func (n *DeleteStmt) Format(buf *TrackedBuffer) {
 	if set(n.WhereClause) {
 		buf.WriteString(" WHERE ")
 		buf.astFormat(n.WhereClause)
+	}
+
+	if items(n.OnCols) || set(n.OnSelectStmt) {
+		buf.WriteString(" ON ")
+
+		if items(n.OnCols) {
+			buf.WriteString("(")
+			buf.astFormat(n.OnCols)
+			buf.WriteString(") ")
+		}
+
+		if set(n.OnSelectStmt) {
+			buf.astFormat(n.OnSelectStmt)
+		}
 	}
 
 	if set(n.LimitCount) {
