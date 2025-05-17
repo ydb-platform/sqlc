@@ -1,9 +1,5 @@
 package ast
 
-import (
-	"fmt"
-)
-
 type DeleteStmt struct {
 	Relations   *List
 	UsingClause *List
@@ -24,7 +20,6 @@ func (n *DeleteStmt) Pos() int {
 }
 
 func (n *DeleteStmt) Format(buf *TrackedBuffer) {
-	fmt.Println("DeleteStmt.Format")
 	if n == nil {
 		return
 	}
