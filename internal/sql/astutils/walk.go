@@ -898,6 +898,9 @@ func Walk(f Visitor, node ast.Node) {
 		}
 
 	case *ast.CreateRoleStmt:
+		if n.BindRole != nil {
+			Walk(f, n.BindRole)
+		}
 		if n.Options != nil {
 			Walk(f, n.Options)
 		}
@@ -1516,6 +1519,17 @@ func Walk(f Visitor, node ast.Node) {
 			Walk(f, n.PartParams)
 		}
 
+	case *ast.Pragma_stmt:
+		if n.Name != nil {
+			Walk(f, n.Name)
+		}
+		if n.Cols != nil {
+			Walk(f, n.Cols)
+		}
+		if n.Values != nil {
+			Walk(f, n.Values)
+		}
+
 	case *ast.PrepareStmt:
 		if n.Argtypes != nil {
 			Walk(f, n.Argtypes)
@@ -1758,7 +1772,9 @@ func Walk(f Visitor, node ast.Node) {
 		}
 
 	case *ast.RoleSpec:
-		// pass
+		if n.BindRolename != nil {
+			Walk(f, n.BindRolename)
+		}
 
 	case *ast.RowCompareExpr:
 		if n.Xpr != nil {
@@ -2061,6 +2077,11 @@ func Walk(f Visitor, node ast.Node) {
 		}
 		if n.WithClause != nil {
 			Walk(f, n.WithClause)
+		}
+
+	case *ast.UseStmt:
+		if n.Xpr != nil {
+			Walk(f, n.Xpr)
 		}
 
 	case *ast.VacuumStmt:
