@@ -42,7 +42,7 @@ func NewCompiler(conf config.SQL, combo config.CombinedSettings) (*Compiler, err
 		c.parser = sqlite.NewParser()
 		c.catalog = sqlite.NewCatalog()
 		c.selector = newSQLiteSelector()
-  case config.EngineYDB:
+	case config.EngineYDB:
 		c.parser = ydb.NewParser()
 		c.catalog = ydb.NewCatalog()
 	case config.EngineMySQL:
