@@ -45,6 +45,7 @@ func NewCompiler(conf config.SQL, combo config.CombinedSettings) (*Compiler, err
 	case config.EngineYDB:
 		c.parser = ydb.NewParser()
 		c.catalog = ydb.NewCatalog()
+		c.selector = newDefaultSelector()
 	case config.EngineMySQL:
 		c.parser = dolphin.NewParser()
 		c.catalog = dolphin.NewCatalog()
