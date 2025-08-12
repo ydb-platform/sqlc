@@ -42,6 +42,8 @@ type tmplCtx struct {
 	OmitSqlcVersion           bool
 	BuildTags                 string
 	WrapErrors                bool
+	EnableYDBRetry            bool
+	YDBRetryIdempotent        bool
 }
 
 func (t *tmplCtx) OutputQuery(sourceName string) bool {
@@ -50,6 +52,9 @@ func (t *tmplCtx) OutputQuery(sourceName string) bool {
 
 func (t *tmplCtx) codegenDbarg() string {
 	if t.EmitMethodsWithDBArgument {
+		if t.EnableYDBRetry {
+			return "db *sql.DB, "
+		}
 		return "db DBTX, "
 	}
 	return ""
@@ -63,7 +68,7 @@ func (t *tmplCtx) codegenEmitPreparedQueries() bool {
 
 func (t *tmplCtx) codegenQueryMethod(q Query) string {
 	db := "q.db"
-	if t.EmitMethodsWithDBArgument {
+	if t.EmitMethodsWithDBArgument || t.EnableYDBRetry {
 		db = "db"
 	}
 
@@ -99,7 +104,7 @@ func (t *tmplCtx) codegenQueryRetval(q Query) (string, error) {
 	case ":execrows", ":execlastid":
 		return "result, err :=", nil
 	case ":execresult":
-		if t.WrapErrors {
+		if t.WrapErrors || t.EnableYDBRetry {
 			return "result, err :=", nil
 		}
 		return "return", nil
@@ -192,6 +197,8 @@ func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, 
 		BuildTags:                 options.BuildTags,
 		OmitSqlcVersion:           options.OmitSqlcVersion,
 		WrapErrors:                options.WrapErrors,
+		EnableYDBRetry:            options.EnableYDBRetry,
+		YDBRetryIdempotent:        options.YDBRetryIdempotent,
 	}
 
 	if tctx.UsesCopyFrom && !tctx.SQLDriver.IsPGX() && options.SqlDriver != opts.SQLDriverGoSQLDriverMySQL {

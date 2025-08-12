@@ -7,7 +7,11 @@ package authors
 import (
 	"context"
 	"database/sql"
+
+	"github.com/ydb-platform/ydb-go-sdk/v3/retry"
 )
+
+type Retrier func(ctx context.Context, op func(ctx context.Context, db DBTX) error) error
 
 type DBTX interface {
 	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
@@ -16,16 +20,55 @@ type DBTX interface {
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }
 
-func New(db DBTX) *Queries {
-	return &Queries{db: db}
+func New(db *sql.DB) *Queries {
+	return &Queries{
+		db: db,
+		retrier: func(ctx context.Context, op func(ctx context.Context, db DBTX) error) error {
+			return retry.Do(ctx, db, func(ctx context.Context, conn *sql.Conn) error {
+				return op(ctx, conn)
+			}, retry.WithIdempotent(true))
+		},
+	}
+}
+
+func (q *Queries) WithRetryOptions( /* opts ...retry.Option */ ) *Queries {
+	q.retrier = func(ctx context.Context, op func(ctx context.Context, db DBTX) error) error {
+		return retry.Do(ctx, q.db, func(ctx context.Context, conn *sql.Conn) error {
+			return op(ctx, conn)
+		}, retry.WithIdempotent(true) /* , opts... */)
+	}
+	return q
 }
 
 type Queries struct {
-	db DBTX
+	retrier Retrier
+	db      *sql.DB
+}
+
+func NewTx(db *sql.DB) *Queries {
+	return &Queries{
+		db: db,
+		retrier: func(ctx context.Context, op func(ctx context.Context, db DBTX) error) error {
+			return retry.DoTx(ctx, db, func(ctx context.Context, tx *sql.Tx) error {
+				return op(ctx, tx)
+			}, retry.WithIdempotent(true))
+		},
+	}
+}
+
+func (q *Queries) WithTxRetryOptions( /* opts ...retry.Option */ ) *Queries {
+	q.retrier = func(ctx context.Context, op func(ctx context.Context, db DBTX) error) error {
+		return retry.DoTx(ctx, q.db, func(ctx context.Context, tx *sql.Tx) error {
+			return op(ctx, tx)
+		}, retry.WithIdempotent(true) /* , opts... */)
+	}
+	return q
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
-		db: tx,
+		retrier: func(ctx context.Context, op func(ctx context.Context, db DBTX) error) error {
+			return op(ctx, tx)
+		},
 	}
 }

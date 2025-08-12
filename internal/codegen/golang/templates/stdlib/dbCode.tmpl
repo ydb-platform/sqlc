@@ -1,4 +1,9 @@
 {{define "dbCodeTemplateStd"}}
+
+{{- if $.EnableYDBRetry }}
+type Retrier func(ctx context.Context, op func(ctx context.Context, db DBTX) error) error
+{{- end }}
+
 type DBTX interface {
 	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
 	PrepareContext(context.Context, string) (*sql.Stmt, error)
@@ -6,6 +11,30 @@ type DBTX interface {
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }
 
+{{ if $.EnableYDBRetry }}
+func New(db *sql.DB) *Queries {
+	return &Queries{
+        {{- if not .EmitMethodsWithDBArgument}}
+	    db: db,
+		{{- end}}
+		retrier: func(ctx context.Context, op func(ctx context.Context, db DBTX) error) error {
+			return retry.Do(ctx, db, func(ctx context.Context, conn *sql.Conn) error {
+				return op(ctx, conn)
+			}
+			{{- if $.YDBRetryIdempotent }}, retry.WithIdempotent(true) {{- end }})
+		},
+	}
+}
+
+func (q *Queries) WithRetryOptions( /* opts ...retry.Option */ ) *Queries {
+    q.retrier = func(ctx context.Context, op func(ctx context.Context, db DBTX) error) error {
+        return retry.Do(ctx, q.db, func(ctx context.Context, conn *sql.Conn) error {
+            return op(ctx, conn)
+        } {{- if $.YDBRetryIdempotent }}, retry.WithIdempotent(true){{- end }} /* , opts... */)
+    }
+    return q
+
+{{- else -}}
 {{ if .EmitMethodsWithDBArgument}}
 func New() *Queries {
 	return &Queries{}
@@ -13,11 +42,26 @@ func New() *Queries {
 func New(db DBTX) *Queries {
 	return &Queries{db: db}
 {{- end}}
+{{- end}}
 }
 
 {{if .EmitPreparedQueries}}
+{{- if $.EnableYDBRetry }}
+func Prepare(ctx context.Context, db *sql.DB) (*Queries, error) {
+    q := Queries{
+		{{- if not .EmitMethodsWithDBArgument}}
+		db: db,
+		{{- end}}
+		retrier: func(ctx context.Context, op func(ctx context.Context, db DBTX) error) error {
+			return retry.Do(ctx, db, func(ctx context.Context, conn *sql.Conn) error {
+				return op(ctx, conn)
+			}{{- if $.YDBRetryIdempotent }}, retry.WithIdempotent(true){{- end }})
+		},
+	}
+{{- else }}
 func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	q := Queries{db: db}
+	{{- end }}
 	var err error
 	{{- if eq (len .GoQueries) 0 }}
 	_ = err
@@ -43,6 +87,19 @@ func (q *Queries) Close() error {
 }
 
 func (q *Queries) exec(ctx context.Context, stmt *sql.Stmt, query string, args ...interface{}) (sql.Result, error) {
+    {{- if $.EnableYDBRetry }}
+    var result sql.Result
+	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
+		var err error
+		if stmt != nil {
+			result, err = stmt.ExecContext(ctx, args...)
+		} else {
+			result, err = db.ExecContext(ctx, query, args...)
+		}
+		return err
+	})
+	return result, err
+	{{- else }}
 	switch {
 	case stmt != nil && q.tx != nil:
 		return q.tx.StmtContext(ctx, stmt).ExecContext(ctx, args...)
@@ -51,9 +108,23 @@ func (q *Queries) exec(ctx context.Context, stmt *sql.Stmt, query string, args .
 	default:
 		return q.db.ExecContext(ctx, query, args...)
 	}
+	{{- end}}
 }
 
 func (q *Queries) query(ctx context.Context, stmt *sql.Stmt, query string, args ...interface{}) (*sql.Rows, error) {
+    {{- if $.EnableYDBRetry }}
+    var rows *sql.Rows
+	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
+		var err error
+		if stmt != nil {
+			rows, err = stmt.QueryContext(ctx, args...)
+		} else {
+			rows, err = db.QueryContext(ctx, query, args...)
+		}
+		return err
+	})
+	return rows, err
+	{{- else }}
 	switch {
 	case stmt != nil && q.tx != nil:
 		return q.tx.StmtContext(ctx, stmt).QueryContext(ctx, args...)
@@ -62,9 +133,22 @@ func (q *Queries) query(ctx context.Context, stmt *sql.Stmt, query string, args 
 	default:
 		return q.db.QueryContext(ctx, query, args...)
 	}
+	{{- end}}
 }
 
 func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, args ...interface{}) (*sql.Row) {
+	{{- if $.EnableYDBRetry }}
+    var row *sql.Row
+	_ = q.retrier(ctx, func(ctx context.Context, db DBTX) error {
+		if stmt != nil {
+			row = stmt.QueryRowContext(ctx, args...)
+		} else {
+			row = db.QueryRowContext(ctx, query, args...)
+		}
+		return nil
+	})
+	return row
+	{{- else }}
 	switch {
 	case stmt != nil && q.tx != nil:
 		return q.tx.StmtContext(ctx, stmt).QueryRowContext(ctx, args...)
@@ -73,22 +157,69 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 	default:
 		return q.db.QueryRowContext(ctx, query, args...)
 	}
+	{{- end}}
 }
 {{end}}
 
 type Queries struct {
+    {{- if $.EnableYDBRetry }}
+	retrier Retrier
+    {{- if not .EmitMethodsWithDBArgument}}
+	db *sql.DB
+	{{- end}}
+    {{- else }}
     {{- if not .EmitMethodsWithDBArgument}}
 	db DBTX
     {{- end}}
+    {{- end}}
 
     {{- if .EmitPreparedQueries}}
+    {{- if not $.EnableYDBRetry }}
 	tx         *sql.Tx
+    {{- end}}
 	{{- range .GoQueries}}
 	{{.FieldName}}  *sql.Stmt
 	{{- end}}
 	{{- end}}
 }
 
+{{ if $.EnableYDBRetry}}
+
+func NewTx(db *sql.DB) *Queries {
+	return &Queries{
+        {{- if not .EmitMethodsWithDBArgument}}
+	    db: db,
+		{{- end}}
+		retrier: func(ctx context.Context, op func(ctx context.Context, db DBTX) error) error {
+			return retry.DoTx(ctx, db, func(ctx context.Context, tx *sql.Tx) error {
+				return op(ctx, tx)
+			}{{- if $.YDBRetryIdempotent }}, retry.WithIdempotent(true){{- end }})
+		},
+	}
+}
+
+func (q *Queries) WithTxRetryOptions( /* opts ...retry.Option */ ) *Queries {
+	q.retrier = func(ctx context.Context, op func(ctx context.Context, db DBTX) error) error {
+        return retry.DoTx(ctx, q.db, func(ctx context.Context, tx *sql.Tx) error {
+            return op(ctx, tx)
+        } {{- if $.YDBRetryIdempotent }}, retry.WithIdempotent(true){{- end }} /* , opts... */)
+    }
+    return q
+}
+
+func (q *Queries) WithTx(tx *sql.Tx) *Queries {
+    return &Queries{
+        {{- if .EmitPreparedQueries}}
+        {{- range .GoQueries}}
+        {{.FieldName}}: q.{{.FieldName}},
+        {{- end}}
+        {{- end}}
+        retrier: func(ctx context.Context, op func(ctx context.Context, db DBTX) error) error {
+            return op(ctx, tx)
+        },
+    }
+}
+{{- else -}}
 {{if not .EmitMethodsWithDBArgument}}
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
@@ -101,5 +232,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		{{- end}}
 	}
 }
+{{- end}}
 {{end}}
 {{end}}
