@@ -46,6 +46,10 @@ type Options struct {
 	BuildTags                   string            `json:"build_tags,omitempty" yaml:"build_tags"`
 	Initialisms                 *[]string         `json:"initialisms,omitempty" yaml:"initialisms"`
 
+	// YDB specific
+	EnableYDBRetry     bool `json:"enable_ydb_retry,omitempty" yaml:"enable_ydb_retry"`
+	YDBRetryIdempotent bool `json:"ydb_retry_idempotent,omitempty" yaml:"ydb_retry_idempotent"`
+
 	InitialismsMap map[string]struct{} `json:"-" yaml:"-"`
 }
 
@@ -71,6 +75,9 @@ func Parse(req *plugin.GenerateRequest) (*Options, error) {
 			options.Rename = map[string]string{}
 		}
 		maps.Copy(options.Rename, global.Rename)
+	}
+	if req.Settings.Engine == "ydb" && (options.SqlPackage == "" || options.SqlPackage == "database/sql") {
+		options.EnableYDBRetry = true
 	}
 	return options, nil
 }
@@ -151,6 +158,8 @@ func ValidateOpts(opts *Options) error {
 	if *opts.QueryParameterLimit < 0 {
 		return fmt.Errorf("invalid options: query parameter limit must not be negative")
 	}
-
+	if !opts.EnableYDBRetry && opts.YDBRetryIdempotent {
+		return fmt.Errorf("invalid options: ydb_retry_idempotent requires enable_ydb_retry to be set")
+	}
 	return nil
 }

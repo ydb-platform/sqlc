@@ -14,6 +14,7 @@ import (
 	migrate "github.com/sqlc-dev/sqlc/internal/migrations"
 	"github.com/sqlc-dev/sqlc/internal/sql/sqlpath"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
+	"github.com/ydb-platform/ydb-go-sdk/v3/retry"
 )
 
 func init() {
@@ -108,9 +109,15 @@ func link_YDB(t *testing.T, migrations []string, rw bool) TestYDB {
 
 	schemeCtx := ydb.WithQueryMode(ctx, ydb.SchemeQueryMode)
 	for _, stmt := range seed {
-		_, err := db.ExecContext(schemeCtx, stmt)
+		err := retry.Do(schemeCtx, db, func(ctx context.Context, conn *sql.Conn) error {
+			_, err := conn.ExecContext(ctx, stmt)
+			return err
+		},
+			retry.WithIdempotent(true),
+			retry.WithLabel("ApplySchemaMigration"),
+		)
 		if err != nil {
-			t.Fatalf("failed to apply migration: %s\nSQL: %s", err, stmt)
+			t.Fatalf("failed to apply migration with retry: %v\nSQL: %s", err, stmt)
 		}
 	}
 	return TestYDB{DB: db, Prefix: prefix}

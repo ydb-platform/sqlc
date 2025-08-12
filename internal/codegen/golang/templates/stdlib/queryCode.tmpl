@@ -23,17 +23,34 @@ type {{.Ret.Type}} struct { {{- range .Ret.Struct.Fields}}
 {{range .Comments}}//{{.}}
 {{end -}}
 func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}) ({{.Ret.DefineType}}, error) {
+    {{- if $.EnableYDBRetry }}
+    {{- if or (ne .Arg.Pair .Ret.Pair) (ne .Arg.DefineType .Ret.DefineType) }}
+    var {{.Ret.Name}} {{.Ret.Type}}
+    {{- end}}
+    err := q.retrier(ctx, func(ctx context.Context, db DBTX) error  {
+        {{- template "queryCodeStdExec" . }}
+        err := row.Scan({{.Ret.Scan}})
+        return err
+    })
+    {{- if $.WrapErrors}}
+    if err != nil {
+        err = fmt.Errorf("query {{.MethodName}}: %w", err)
+    }
+    {{- end}}
+    return {{.Ret.ReturnName}}, err
+    {{- else}}
     {{- template "queryCodeStdExec" . }}
-	{{- if or (ne .Arg.Pair .Ret.Pair) (ne .Arg.DefineType .Ret.DefineType) }}
-	var {{.Ret.Name}} {{.Ret.Type}}
-	{{- end}}
-	err := row.Scan({{.Ret.Scan}})
-	{{- if $.WrapErrors}}
-	if err != nil {
-		err = fmt.Errorf("query {{.MethodName}}: %w", err)
-	}
-	{{- end}}
-	return {{.Ret.ReturnName}}, err
+    {{- if or (ne .Arg.Pair .Ret.Pair) (ne .Arg.DefineType .Ret.DefineType) }}
+    var {{.Ret.Name}} {{.Ret.Type}}
+    {{- end}}
+    err := row.Scan({{.Ret.Scan}})
+    {{- if $.WrapErrors}}
+    if err != nil {
+        err = fmt.Errorf("query {{.MethodName}}: %w", err)
+    }
+    {{- end}}
+    return {{.Ret.ReturnName}}, err
+    {{- end }}
 }
 {{end}}
 
@@ -41,6 +58,39 @@ func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}
 {{range .Comments}}//{{.}}
 {{end -}}
 func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}) ([]{{.Ret.DefineType}}, error) {
+    {{- if $.EnableYDBRetry }}
+    var items []{{.Ret.DefineType}}
+    
+    err := q.retrier(ctx, func(ctx context.Context, db DBTX) error  {
+        {{- if $.EmitEmptySlices}}
+        items = []{{.Ret.DefineType}}{}
+        {{else}}
+        items = nil
+        {{end -}}
+        
+        {{- template "queryCodeStdExec" . }}
+        if err != nil {
+            return err
+        }
+        defer rows.Close()
+        for rows.Next() {
+            var {{.Ret.Name}} {{.Ret.Type}}
+            if err := rows.Scan({{.Ret.Scan}}); err != nil {
+                return err
+            }
+            items = append(items, {{.Ret.ReturnName}})
+        }
+        if err := rows.Close(); err != nil {
+            return err
+        }
+        
+        return rows.Err()
+    })
+    if err != nil {
+        return nil, {{if $.WrapErrors}}fmt.Errorf("query {{.MethodName}}: %w", err){{else}}err{{end}}
+    }
+    return items, nil
+    {{- else}}
     {{- template "queryCodeStdExec" . }}
     if err != nil {
         return nil, {{if $.WrapErrors}}fmt.Errorf("query {{.MethodName}}: %w", err){{else}}err{{end}}
@@ -65,6 +115,7 @@ func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}
         return nil, {{if $.WrapErrors}}fmt.Errorf("query {{.MethodName}}: %w", err){{else}}err{{end}}
     }
     return items, nil
+    {{- end }}
 }
 {{end}}
 
@@ -72,6 +123,18 @@ func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}
 {{range .Comments}}//{{.}}
 {{end -}}
 func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}) error {
+    {{- if $.EnableYDBRetry }}
+    err := q.retrier(ctx, func(ctx context.Context, db DBTX) error  {
+        {{- template "queryCodeStdExec" . }}
+        return err
+    })
+    {{- if $.WrapErrors}}
+    if err != nil {
+        err = fmt.Errorf("query {{.MethodName}}: %w", err)
+    }
+    {{- end}}
+    return err
+    {{- else}}
     {{- template "queryCodeStdExec" . }}
     {{- if $.WrapErrors}}
     if err != nil {
@@ -79,6 +142,7 @@ func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}
     }
     {{- end}}
     return err
+    {{- end}}
 }
 {{end}}
 
@@ -86,11 +150,31 @@ func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}
 {{range .Comments}}//{{.}}
 {{end -}}
 func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}) (int64, error) {
+    {{- if $.EnableYDBRetry }}
+    var rowsAffected int64
+    
+    err := q.retrier(ctx, func(ctx context.Context, db DBTX) error  {
+        {{- template "queryCodeStdExec" . }}
+        if err != nil {
+            return err
+        }
+        
+        rowsAffected, err = result.RowsAffected()
+        return err
+    })
+
+    if err != nil {
+        return 0, {{if $.WrapErrors}}fmt.Errorf("query {{.MethodName}}: %w", err){{else}}err{{end}}
+    }
+    
+    return rowsAffected, nil
+    {{- else}}
     {{- template "queryCodeStdExec" . }}
     if err != nil {
         return 0, {{if $.WrapErrors}}fmt.Errorf("query {{.MethodName}}: %w", err){{else}}err{{end}}
     }
     return result.RowsAffected()
+    {{- end}}
 }
 {{end}}
 
@@ -98,11 +182,31 @@ func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}
 {{range .Comments}}//{{.}}
 {{end -}}
 func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}) (int64, error) {
+    {{- if $.EnableYDBRetry }}
+    var lastID int64
+    
+    err := q.retrier(ctx, func(ctx context.Context, db DBTX) error  {
+        {{- template "queryCodeStdExec" . }}
+        if err != nil {
+            return err
+        }
+        
+        lastID, err = result.LastInsertId()
+        return err
+    })
+    
+    if err != nil {
+        return 0, {{if $.WrapErrors}}fmt.Errorf("query {{.MethodName}}: %w", err){{else}}err{{end}}
+    }
+    
+    return lastID, nil
+    {{- else}}
     {{- template "queryCodeStdExec" . }}
     if err != nil {
         return 0, {{if $.WrapErrors}}fmt.Errorf("query {{.MethodName}}: %w", err){{else}}err{{end}}
     }
     return result.LastInsertId()
+    {{- end}}
 }
 {{end}}
 
@@ -110,12 +214,30 @@ func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}
 {{range .Comments}}//{{.}}
 {{end -}}
 func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}) (sql.Result, error) {
+    {{- if $.EnableYDBRetry }}
+    var sqlResult sql.Result
+    
+    err := q.retrier(ctx, func(ctx context.Context, db DBTX) error  {
+        {{- template "queryCodeStdExec" . }}
+        
+        sqlResult = result
+        return err
+    })
+    
+    {{- if $.WrapErrors}}
+    if err != nil {
+        return nil, fmt.Errorf("query {{.MethodName}}: %w", err)
+    }
+    {{- end}}
+    return sqlResult, err
+    {{- else}}
     {{- template "queryCodeStdExec" . }}
     {{- if $.WrapErrors}}
     if err != nil {
         err = fmt.Errorf("query {{.MethodName}}: %w", err)
     }
     return result, err
+    {{- end}}
     {{- end}}
 }
 {{end}}

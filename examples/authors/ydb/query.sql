@@ -13,10 +13,10 @@ WHERE name = $p0;
 SELECT * FROM authors
 WHERE bio IS NULL;
 
--- name: Count :one
+-- name: CountAuthors :one
 SELECT COUNT(*) FROM authors;
 
--- name: COALESCE :many
+-- name: Coalesce :many
 SELECT id, name, COALESCE(bio, 'Null value!') FROM authors;
 
 -- name: CreateOrUpdateAuthor :execresult 

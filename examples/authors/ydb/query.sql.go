@@ -10,47 +10,56 @@ import (
 	"database/sql"
 )
 
-const cOALESCE = `-- name: COALESCE :many
+const coalesce = `-- name: Coalesce :many
 SELECT id, name, COALESCE(bio, 'Null value!') FROM authors
 `
 
-type COALESCERow struct {
+type CoalesceRow struct {
 	ID   uint64 `json:"id"`
 	Name string `json:"name"`
 	Bio  string `json:"bio"`
 }
 
-func (q *Queries) COALESCE(ctx context.Context) ([]COALESCERow, error) {
-	rows, err := q.db.QueryContext(ctx, cOALESCE)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []COALESCERow
-	for rows.Next() {
-		var i COALESCERow
-		if err := rows.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
-			return nil, err
+func (q *Queries) Coalesce(ctx context.Context) ([]CoalesceRow, error) {
+	var items []CoalesceRow
+
+	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
+		items = nil
+		rows, err := db.QueryContext(ctx, coalesce)
+		if err != nil {
+			return err
 		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var i CoalesceRow
+			if err := rows.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
+				return err
+			}
+			items = append(items, i)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+
+		return rows.Err()
+	})
+	if err != nil {
 		return nil, err
 	}
 	return items, nil
 }
 
-const count = `-- name: Count :one
+const countAuthors = `-- name: CountAuthors :one
 SELECT COUNT(*) FROM authors
 `
 
-func (q *Queries) Count(ctx context.Context) (uint64, error) {
-	row := q.db.QueryRowContext(ctx, count)
+func (q *Queries) CountAuthors(ctx context.Context) (uint64, error) {
 	var count uint64
-	err := row.Scan(&count)
+	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
+		row := db.QueryRowContext(ctx, countAuthors)
+		err := row.Scan(&count)
+		return err
+	})
 	return count, err
 }
 
@@ -65,7 +74,15 @@ type CreateOrUpdateAuthorParams struct {
 }
 
 func (q *Queries) CreateOrUpdateAuthor(ctx context.Context, arg CreateOrUpdateAuthorParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, createOrUpdateAuthor, arg.P0, arg.P1, arg.P2)
+	var sqlResult sql.Result
+
+	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
+		result, err := db.ExecContext(ctx, createOrUpdateAuthor, arg.P0, arg.P1, arg.P2)
+
+		sqlResult = result
+		return err
+	})
+	return sqlResult, err
 }
 
 const createOrUpdateAuthorReturningBio = `-- name: CreateOrUpdateAuthorReturningBio :one
@@ -79,9 +96,12 @@ type CreateOrUpdateAuthorReturningBioParams struct {
 }
 
 func (q *Queries) CreateOrUpdateAuthorReturningBio(ctx context.Context, arg CreateOrUpdateAuthorReturningBioParams) (*string, error) {
-	row := q.db.QueryRowContext(ctx, createOrUpdateAuthorReturningBio, arg.P0, arg.P1, arg.P2)
 	var bio *string
-	err := row.Scan(&bio)
+	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
+		row := db.QueryRowContext(ctx, createOrUpdateAuthorReturningBio, arg.P0, arg.P1, arg.P2)
+		err := row.Scan(&bio)
+		return err
+	})
 	return bio, err
 }
 
@@ -90,7 +110,10 @@ DELETE FROM authors WHERE id = $p0
 `
 
 func (q *Queries) DeleteAuthor(ctx context.Context, p0 uint64) error {
-	_, err := q.db.ExecContext(ctx, deleteAuthor, p0)
+	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
+		_, err := db.ExecContext(ctx, deleteAuthor, p0)
+		return err
+	})
 	return err
 }
 
@@ -100,9 +123,12 @@ WHERE id = $p0
 `
 
 func (q *Queries) GetAuthor(ctx context.Context, p0 uint64) (Author, error) {
-	row := q.db.QueryRowContext(ctx, getAuthor, p0)
 	var i Author
-	err := row.Scan(&i.ID, &i.Name, &i.Bio)
+	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
+		row := db.QueryRowContext(ctx, getAuthor, p0)
+		err := row.Scan(&i.ID, &i.Name, &i.Bio)
+		return err
+	})
 	return i, err
 }
 
@@ -112,23 +138,29 @@ WHERE name = $p0
 `
 
 func (q *Queries) GetAuthorsByName(ctx context.Context, p0 string) ([]Author, error) {
-	rows, err := q.db.QueryContext(ctx, getAuthorsByName, p0)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	var items []Author
-	for rows.Next() {
-		var i Author
-		if err := rows.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
-			return nil, err
+
+	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
+		items = nil
+		rows, err := db.QueryContext(ctx, getAuthorsByName, p0)
+		if err != nil {
+			return err
 		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var i Author
+			if err := rows.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
+				return err
+			}
+			items = append(items, i)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+
+		return rows.Err()
+	})
+	if err != nil {
 		return nil, err
 	}
 	return items, nil
@@ -139,23 +171,29 @@ SELECT id, name, bio FROM authors
 `
 
 func (q *Queries) ListAuthors(ctx context.Context) ([]Author, error) {
-	rows, err := q.db.QueryContext(ctx, listAuthors)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	var items []Author
-	for rows.Next() {
-		var i Author
-		if err := rows.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
-			return nil, err
+
+	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
+		items = nil
+		rows, err := db.QueryContext(ctx, listAuthors)
+		if err != nil {
+			return err
 		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var i Author
+			if err := rows.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
+				return err
+			}
+			items = append(items, i)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+
+		return rows.Err()
+	})
+	if err != nil {
 		return nil, err
 	}
 	return items, nil
@@ -167,23 +205,29 @@ WHERE bio IS NULL
 `
 
 func (q *Queries) ListAuthorsWithNullBio(ctx context.Context) ([]Author, error) {
-	rows, err := q.db.QueryContext(ctx, listAuthorsWithNullBio)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	var items []Author
-	for rows.Next() {
-		var i Author
-		if err := rows.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
-			return nil, err
+
+	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
+		items = nil
+		rows, err := db.QueryContext(ctx, listAuthorsWithNullBio)
+		if err != nil {
+			return err
 		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var i Author
+			if err := rows.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
+				return err
+			}
+			items = append(items, i)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+
+		return rows.Err()
+	})
+	if err != nil {
 		return nil, err
 	}
 	return items, nil
@@ -200,8 +244,11 @@ type UpdateAuthorByIDParams struct {
 }
 
 func (q *Queries) UpdateAuthorByID(ctx context.Context, arg UpdateAuthorByIDParams) (Author, error) {
-	row := q.db.QueryRowContext(ctx, updateAuthorByID, arg.P0, arg.P1, arg.P2)
 	var i Author
-	err := row.Scan(&i.ID, &i.Name, &i.Bio)
+	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
+		row := db.QueryRowContext(ctx, updateAuthorByID, arg.P0, arg.P1, arg.P2)
+		err := row.Scan(&i.ID, &i.Name, &i.Bio)
+		return err
+	})
 	return i, err
 }
