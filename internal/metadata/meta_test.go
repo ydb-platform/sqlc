@@ -78,6 +78,26 @@ func TestParseQueryParams(t *testing.T) {
 			" @param foo_id UUID ",
 			" @param @invalid UUID ",
 		},
+		{
+			" name: YDBQuery :one",
+			" @ydb-label critical-operation",
+		},
+		{
+			" name: YDBQuery :one",
+			" @ydb-fast-backoff 100ms 5 0.1",
+		},
+		{
+			" name: YDBQuery :one",
+			" @ydb-slow-backoff 1s 10 0.2",
+		},
+		{
+			" name: YDBQuery :one",
+			" @ydb-tx-options {\"isolation\":\"serializable\",\"readonly\":false}",
+		},
+		{
+			" name: YDBQuery :one",
+			" @ydb-budget {\"ttl\":\"30s\",\"limit\":5}",
+		},
 	} {
 		params, _, _, err := ParseCommentFlags(comments)
 		if err != nil {
@@ -96,6 +116,20 @@ func TestParseQueryParams(t *testing.T) {
 		_, ok = params["invalid"]
 		if ok {
 			t.Errorf("unexpected param found")
+		}
+
+		if txOpts, ok := params["@ydb-tx-options"]; ok {
+			expected := `{"isolation":"serializable","readonly":false}`
+			if txOpts != expected {
+				t.Errorf("unexpected YDB tx options param: %s, expected: %s", txOpts, expected)
+			}
+		}
+
+		if budget, ok := params["@ydb-budget"]; ok {
+			expected := `{"ttl":"30s","limit":5}`
+			if budget != expected {
+				t.Errorf("unexpected YDB budget param: %s, expected: %s", budget, expected)
+			}
 		}
 	}
 }
@@ -124,6 +158,10 @@ func TestParseQueryFlags(t *testing.T) {
 			" @flag-foo",
 			" @param @flag-bar UUID",
 		},
+		{
+			" name: YDBQuery :one",
+			" @ydb-retry-idempotent",
+		},
 	} {
 		_, flags, _, err := ParseCommentFlags(comments)
 		if err != nil {
@@ -136,6 +174,10 @@ func TestParseQueryFlags(t *testing.T) {
 
 		if flags["@flag-bar"] {
 			t.Errorf("unexpected flag found")
+		}
+
+		if !flags["@ydb-retry-idempotent"] {
+			t.Errorf("expected flag not found")
 		}
 	}
 }

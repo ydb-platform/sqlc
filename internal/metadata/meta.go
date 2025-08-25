@@ -3,9 +3,10 @@ package metadata
 import (
 	"bufio"
 	"fmt"
-	"github.com/sqlc-dev/sqlc/internal/constants"
 	"strings"
 	"unicode"
+
+	"github.com/sqlc-dev/sqlc/internal/constants"
 
 	"github.com/sqlc-dev/sqlc/internal/source"
 )
@@ -158,6 +159,26 @@ func ParseCommentFlags(comments []string) (map[string]string, map[string]bool, m
 			for s.Scan() {
 				ruleSkiplist[s.Text()] = struct{}{}
 			}
+
+		case constants.QueryFlagYDBRetryIdempotent:
+			flags[token] = true
+		
+		case constants.QueryFlagDirectTx:
+			flags[token] = true
+
+		case constants.QueryFlagYDBWithTx:
+			var txOptionsParams []string
+			for s.Scan() {
+				txOptionsParams = append(txOptionsParams, s.Text())
+			}
+			params[token] = strings.Join(txOptionsParams, " ")
+
+		case constants.QueryFlagYDBBudget:
+			var budgetParams []string
+			for s.Scan() {
+				budgetParams = append(budgetParams, s.Text())
+			}
+			params[token] = strings.Join(budgetParams, " ")
 
 		default:
 			flags[token] = true

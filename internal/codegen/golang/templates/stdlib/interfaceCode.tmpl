@@ -5,7 +5,7 @@
         {{- if and (eq .Cmd ":one") ($dbtxParam) }}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, db DBTX, {{.Arg.Pair}}) ({{.Ret.DefineType}}, error)
+            {{.MethodName}}(ctx context.Context, {{if and ($.EnableYDBRetry) (eq .RetryMode "direct") }} tx *sql.Tx, {{else}} {{ dbarg }} {{end}} {{.Arg.Pair}}) ({{.Ret.DefineType}}, error)
         {{- else if eq .Cmd ":one"}}
             {{range .Comments}}//{{.}}
             {{end -}}
@@ -14,7 +14,7 @@
         {{- if and (eq .Cmd ":many") ($dbtxParam) }}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, db DBTX, {{.Arg.Pair}}) ([]{{.Ret.DefineType}}, error)
+            {{.MethodName}}(ctx context.Context, {{if and ($.EnableYDBRetry) (eq .RetryMode "direct") }} tx *sql.Tx, {{else}} {{ dbarg }} {{end}} {{.Arg.Pair}}) ([]{{.Ret.DefineType}}, error)
         {{- else if eq .Cmd ":many"}}
             {{range .Comments}}//{{.}}
             {{end -}}
@@ -23,7 +23,7 @@
         {{- if and (eq .Cmd ":exec") ($dbtxParam) }}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, db DBTX, {{.Arg.Pair}}) error
+            {{.MethodName}}(ctx context.Context, {{if and ($.EnableYDBRetry) (eq .RetryMode "direct") }} tx *sql.Tx, {{else}} {{ dbarg }} {{end}} {{.Arg.Pair}}) error
         {{- else if eq .Cmd ":exec"}}
             {{range .Comments}}//{{.}}
             {{end -}}
@@ -50,7 +50,7 @@
         {{- if and (eq .Cmd ":execresult") ($dbtxParam) }}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, db DBTX, {{.Arg.Pair}}) (sql.Result, error)
+            {{.MethodName}}(ctx context.Context, {{if and ($.EnableYDBRetry) (eq .RetryMode "direct") }} tx *sql.Tx, {{else}} {{ dbarg }} {{end}} {{.Arg.Pair}}) (sql.Result, error)
         {{- else if eq .Cmd ":execresult"}}
             {{range .Comments}}//{{.}}
             {{end -}}

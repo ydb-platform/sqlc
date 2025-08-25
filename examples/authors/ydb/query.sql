@@ -1,25 +1,12 @@
--- name: ListAuthors :many 
-SELECT * FROM authors;
-
--- name: GetAuthor :one
-SELECT * FROM authors
-WHERE id = $p0;
-
--- name: GetAuthorsByName :many
-SELECT * FROM authors
-WHERE name = $p0;
-
--- name: ListAuthorsWithNullBio :many
-SELECT * FROM authors
-WHERE bio IS NULL;
-
 -- name: CountAuthors :one
+-- @ydb-retry-idempotent
 SELECT COUNT(*) FROM authors;
 
 -- name: Coalesce :many
 SELECT id, name, COALESCE(bio, 'Null value!') FROM authors;
 
 -- name: CreateOrUpdateAuthor :execresult 
+-- @ydb-with-tx 
 UPSERT INTO authors (id, name, bio) VALUES ($p0, $p1, $p2);
 
 -- name: CreateOrUpdateAuthorReturningBio :one

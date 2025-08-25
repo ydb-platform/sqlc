@@ -199,6 +199,11 @@ func buildQueries(req *plugin.GenerateRequest, options *opts.Options, structs []
 		} else {
 			constantName = sdk.LowerTitle(query.Name)
 		}
+		
+		var retryMode, retryOptions, txOptions string
+		if options.EnableYDBRetry {
+			retryMode, retryOptions, txOptions = parseYDBMetadata(&query.Comments)
+		}
 
 		comments := query.Comments
 		if options.EmitSqlAsComment {
@@ -226,6 +231,13 @@ func buildQueries(req *plugin.GenerateRequest, options *opts.Options, structs []
 			Comments:     comments,
 			Table:        query.InsertIntoTable,
 		}
+		
+  		if options.EnableYDBRetry {
+            gq.RetryMode = retryMode
+            gq.RetryOptions = retryOptions
+            gq.TxOptions = txOptions
+        }
+		
 		sqlpkg := parseDriver(options.SqlPackage)
 
 		qpl := int(*options.QueryParameterLimit)

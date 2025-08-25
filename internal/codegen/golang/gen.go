@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"go/format"
+	"strconv"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/sqlc-dev/sqlc/internal/codegen/golang/opts"
 	"github.com/sqlc-dev/sqlc/internal/codegen/sdk"
@@ -68,8 +71,13 @@ func (t *tmplCtx) codegenEmitPreparedQueries() bool {
 
 func (t *tmplCtx) codegenQueryMethod(q Query) string {
 	db := "q.db"
-	if t.EmitMethodsWithDBArgument || t.EnableYDBRetry {
+	if t.EmitMethodsWithDBArgument {
 		db = "db"
+		if t.EnableYDBRetry && q.RetryMode == "direct" {
+			db = "tx"
+		}
+	} else if t.EnableYDBRetry && q.RetryMode == "direct" {
+		db = "q.tx"
 	}
 
 	switch q.Cmd {
@@ -102,6 +110,9 @@ func (t *tmplCtx) codegenQueryRetval(q Query) (string, error) {
 	case ":exec":
 		return "_, err :=", nil
 	case ":execrows", ":execlastid":
+		if t.EnableYDBRetry {
+			return "", fmt.Errorf("YDB doesn't support %q code generation", q.Cmd)
+		}
 		return "result, err :=", nil
 	case ":execresult":
 		if t.WrapErrors || t.EnableYDBRetry {
@@ -111,6 +122,168 @@ func (t *tmplCtx) codegenQueryRetval(q Query) (string, error) {
 	default:
 		return "", fmt.Errorf("unhandled q.Cmd case %q", q.Cmd)
 	}
+}
+
+// Helper function to parse YDB metadata from comments
+func parseYDBMetadata(comments *[]string) (string, string, string) {
+	retryMode := "do"
+	var retryOptions []string
+	var txOptionsStr string
+
+	flags := make(map[string]bool)
+	params := make(map[string]string)
+
+	idx := 0
+	for _, comment := range *comments {
+		if after, found := strings.CutPrefix(comment, "YDB_FLAG:"); found {
+			flags[after] = true
+		} else if after, found := strings.CutPrefix(comment, "YDB_PARAM:"); found {
+			if idx := strings.Index(after, "="); idx >= 0 {
+				key := after[:idx]
+				value := after[idx+1:]
+				params[key] = value
+			}
+		} else if !strings.Contains(comment, "@ydb-") {
+			(*comments)[idx] = comment
+			idx++
+		}
+	}
+	*comments = (*comments)[:idx]
+
+	if flags["@ydb-direct-tx"] {
+		retryMode = "direct"
+	} else if options, ok := params["@ydb-with-tx"]; ok {
+		retryMode = "dotx"
+		txOptionsStr = fmt.Sprintf("retry.WithTxOptions(%s)", codegenYDBTxOptions(options))
+	}
+
+	if budget, ok := params["@ydb-budget"]; ok && budget != "" {
+		retryOptions = append(retryOptions, fmt.Sprintf("retry.WithBudget(%s)", codegenYDBBudget(budget)))
+	}
+
+	if label, ok := params["@ydb-retry-label"]; ok {
+		retryOptions = append(retryOptions, fmt.Sprintf("retry.WithLabel(%q)", label))
+	}
+
+	if flags["@ydb-retry-idempotent"] {
+		retryOptions = append(retryOptions, "retry.WithIdempotent(true)")
+	}
+
+	var retryOptsStr string
+	if len(retryOptions) > 0 {
+		retryOptsStr = ",\n" + strings.Join(retryOptions, ",\n")
+		if txOptionsStr != "" {
+			retryOptsStr += ",\n" + txOptionsStr
+		}
+	} else if txOptionsStr != "" {
+		retryOptsStr = ",\n" + txOptionsStr
+	}
+
+	if retryOptsStr != "" {
+		retryOptsStr += ",\n"
+	}
+
+	return retryMode, retryOptsStr, txOptionsStr
+}
+
+func codegenYDBBudget(budgetStr string) string {
+	budgetStr = strings.TrimSpace(budgetStr)
+
+	if strings.HasPrefix(budgetStr, "{") {
+		var budget struct {
+			TTL   string `json:"ttl"`
+			Limit int    `json:"limit"`
+		}
+		if err := json.Unmarshal([]byte(budgetStr), &budget); err == nil {
+			if budget.TTL != "" {
+				if _, err := time.ParseDuration(budget.TTL); err == nil {
+					return fmt.Sprintf("budget.WithTTL(%s, %d)",
+						formatDuration(budget.TTL), budget.Limit)
+				}
+			}
+			return fmt.Sprintf("budget.Limited(%d)", budget.Limit)
+		}
+	}
+
+	if limit, err := strconv.Atoi(budgetStr); err == nil {
+		return fmt.Sprintf("budget.Limited(%d)", limit)
+	}
+
+	return "budget.Limited(5)"
+}
+
+func codegenYDBTxOptions(optionsStr string) string {
+	txOptions := "&sql.TxOptions{\n\tIsolation: %s,\n\tReadOnly:  %t,\n}"
+	if optionsStr == "" {
+		return fmt.Sprintf(txOptions, "sql.LevelDefault", false)
+	}
+
+	var opts struct {
+		Isolation string `json:"isolation"`
+		ReadOnly  bool   `json:"readonly"`
+	}
+
+	if err := json.Unmarshal([]byte(optionsStr), &opts); err != nil {
+		return fmt.Sprintf(txOptions, "sql.LevelDefault", false)
+	}
+
+	var isolation string
+	switch strings.ToLower(opts.Isolation) {
+	case "serializable":
+		isolation = "sql.LevelSerializable"
+	case "read_committed", "readcommitted":
+		isolation = "sql.LevelReadCommitted"
+	case "repeatable_read", "repeatableread":
+		isolation = "sql.LevelRepeatableRead"
+	case "read_uncommitted", "readuncommitted":
+		isolation = "sql.LevelReadUncommitted"
+	case "write_committed", "writecommitted":
+		isolation = "sql.LevelWriteCommitted"
+	case "snapshot":
+		isolation = "sql.LevelSnapshot"
+	case "linearizable":
+		isolation = "sql.LevelLinearizable"
+	default:
+		isolation = "sql.LevelDefault"
+	}
+
+	return fmt.Sprintf(txOptions, isolation, opts.ReadOnly)
+}
+
+func formatDuration(durationStr string) string {
+	d, err := time.ParseDuration(durationStr)
+	if err != nil {
+		return durationStr
+	}
+
+	if d < time.Microsecond {
+		return fmt.Sprintf("%d * time.Nanosecond", d.Nanoseconds())
+	}
+	if d < time.Millisecond {
+		return fmt.Sprintf("%d * time.Microsecond", d.Nanoseconds()/1000)
+	}
+	if d < time.Second {
+		return fmt.Sprintf("%d * time.Millisecond", d.Nanoseconds()/1000000)
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("%d * time.Second", int64(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%d * time.Minute", int64(d.Minutes()))
+	}
+	return fmt.Sprintf("%d * time.Hour", int64(d.Hours()))
+}
+
+func (t *tmplCtx) codegenYDBRetryMode(q Query) string {
+	return q.RetryMode
+}
+
+func (t *tmplCtx) codegenYDBRetryOptions(q Query) string {
+	return q.RetryOptions
+}
+
+func (t *tmplCtx) codegenYDBTxOptions(q Query) string {
+	return q.TxOptions
 }
 
 func Generate(ctx context.Context, req *plugin.GenerateRequest) (*plugin.GenerateResponse, error) {
@@ -230,6 +403,11 @@ func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, 
 		"emitPreparedQueries": tctx.codegenEmitPreparedQueries,
 		"queryMethod":         tctx.codegenQueryMethod,
 		"queryRetval":         tctx.codegenQueryRetval,
+
+		// YDB specific methods
+		"ydbRetryMode":    tctx.codegenYDBRetryMode,
+		"ydbRetryOptions": tctx.codegenYDBRetryOptions,
+		"ydbTxOptions":    tctx.codegenYDBTxOptions,
 	}
 
 	tmpl := template.Must(

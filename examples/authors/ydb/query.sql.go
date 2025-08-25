@@ -8,6 +8,8 @@ package authors
 import (
 	"context"
 	"database/sql"
+
+	"github.com/ydb-platform/ydb-go-sdk/v3/retry"
 )
 
 const coalesce = `-- name: Coalesce :many
@@ -15,17 +17,16 @@ SELECT id, name, COALESCE(bio, 'Null value!') FROM authors
 `
 
 type CoalesceRow struct {
-	ID   uint64 `json:"id"`
-	Name string `json:"name"`
-	Bio  string `json:"bio"`
+	ID   uint64
+	Name string
+	Bio  string
 }
 
 func (q *Queries) Coalesce(ctx context.Context) ([]CoalesceRow, error) {
 	var items []CoalesceRow
-
-	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
+	err := retry.Do(ctx, q.db, func(ctx context.Context, conn *sql.Conn) error {
 		items = nil
-		rows, err := db.QueryContext(ctx, coalesce)
+		rows, err := q.db.QueryContext(ctx, coalesce)
 		if err != nil {
 			return err
 		}
@@ -55,11 +56,13 @@ SELECT COUNT(*) FROM authors
 
 func (q *Queries) CountAuthors(ctx context.Context) (uint64, error) {
 	var count uint64
-	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
-		row := db.QueryRowContext(ctx, countAuthors)
+	err := retry.Do(ctx, q.db, func(ctx context.Context, conn *sql.Conn) error {
+		row := q.db.QueryRowContext(ctx, countAuthors)
 		err := row.Scan(&count)
 		return err
-	})
+	},
+		retry.WithIdempotent(true),
+	)
 	return count, err
 }
 
@@ -68,20 +71,24 @@ UPSERT INTO authors (id, name, bio) VALUES ($p0, $p1, $p2)
 `
 
 type CreateOrUpdateAuthorParams struct {
-	P0 uint64  `json:"p0"`
-	P1 string  `json:"p1"`
-	P2 *string `json:"p2"`
+	P0 uint64
+	P1 string
+	P2 *string
 }
 
 func (q *Queries) CreateOrUpdateAuthor(ctx context.Context, arg CreateOrUpdateAuthorParams) (sql.Result, error) {
 	var sqlResult sql.Result
-
-	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
-		result, err := db.ExecContext(ctx, createOrUpdateAuthor, arg.P0, arg.P1, arg.P2)
+	err := retry.DoTx(ctx, q.db, func(ctx context.Context, tx *sql.Tx) error {
+		result, err := q.db.ExecContext(ctx, createOrUpdateAuthor, arg.P0, arg.P1, arg.P2)
 
 		sqlResult = result
 		return err
-	})
+	},
+		retry.WithTxOptions(&sql.TxOptions{
+			Isolation: sql.LevelDefault,
+			ReadOnly:  false,
+		}),
+	)
 	return sqlResult, err
 }
 
@@ -90,15 +97,15 @@ UPSERT INTO authors (id, name, bio) VALUES ($p0, $p1, $p2) RETURNING bio
 `
 
 type CreateOrUpdateAuthorReturningBioParams struct {
-	P0 uint64  `json:"p0"`
-	P1 string  `json:"p1"`
-	P2 *string `json:"p2"`
+	P0 uint64
+	P1 string
+	P2 *string
 }
 
 func (q *Queries) CreateOrUpdateAuthorReturningBio(ctx context.Context, arg CreateOrUpdateAuthorReturningBioParams) (*string, error) {
 	var bio *string
-	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
-		row := db.QueryRowContext(ctx, createOrUpdateAuthorReturningBio, arg.P0, arg.P1, arg.P2)
+	err := retry.Do(ctx, q.db, func(ctx context.Context, conn *sql.Conn) error {
+		row := q.db.QueryRowContext(ctx, createOrUpdateAuthorReturningBio, arg.P0, arg.P1, arg.P2)
 		err := row.Scan(&bio)
 		return err
 	})
@@ -110,127 +117,11 @@ DELETE FROM authors WHERE id = $p0
 `
 
 func (q *Queries) DeleteAuthor(ctx context.Context, p0 uint64) error {
-	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
-		_, err := db.ExecContext(ctx, deleteAuthor, p0)
+	err := retry.Do(ctx, q.db, func(ctx context.Context, conn *sql.Conn) error {
+		_, err := q.db.ExecContext(ctx, deleteAuthor, p0)
 		return err
 	})
 	return err
-}
-
-const getAuthor = `-- name: GetAuthor :one
-SELECT id, name, bio FROM authors
-WHERE id = $p0
-`
-
-func (q *Queries) GetAuthor(ctx context.Context, p0 uint64) (Author, error) {
-	var i Author
-	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
-		row := db.QueryRowContext(ctx, getAuthor, p0)
-		err := row.Scan(&i.ID, &i.Name, &i.Bio)
-		return err
-	})
-	return i, err
-}
-
-const getAuthorsByName = `-- name: GetAuthorsByName :many
-SELECT id, name, bio FROM authors
-WHERE name = $p0
-`
-
-func (q *Queries) GetAuthorsByName(ctx context.Context, p0 string) ([]Author, error) {
-	var items []Author
-
-	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
-		items = nil
-		rows, err := db.QueryContext(ctx, getAuthorsByName, p0)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var i Author
-			if err := rows.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
-				return err
-			}
-			items = append(items, i)
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-
-		return rows.Err()
-	})
-	if err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listAuthors = `-- name: ListAuthors :many
-SELECT id, name, bio FROM authors
-`
-
-func (q *Queries) ListAuthors(ctx context.Context) ([]Author, error) {
-	var items []Author
-
-	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
-		items = nil
-		rows, err := db.QueryContext(ctx, listAuthors)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var i Author
-			if err := rows.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
-				return err
-			}
-			items = append(items, i)
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-
-		return rows.Err()
-	})
-	if err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listAuthorsWithNullBio = `-- name: ListAuthorsWithNullBio :many
-SELECT id, name, bio FROM authors
-WHERE bio IS NULL
-`
-
-func (q *Queries) ListAuthorsWithNullBio(ctx context.Context) ([]Author, error) {
-	var items []Author
-
-	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
-		items = nil
-		rows, err := db.QueryContext(ctx, listAuthorsWithNullBio)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var i Author
-			if err := rows.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
-				return err
-			}
-			items = append(items, i)
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-
-		return rows.Err()
-	})
-	if err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const updateAuthorByID = `-- name: UpdateAuthorByID :one
@@ -238,15 +129,15 @@ UPDATE authors SET name = $p0, bio = $p1 WHERE id = $p2 RETURNING id, name, bio
 `
 
 type UpdateAuthorByIDParams struct {
-	P0 string  `json:"p0"`
-	P1 *string `json:"p1"`
-	P2 uint64  `json:"p2"`
+	P0 string
+	P1 *string
+	P2 uint64
 }
 
 func (q *Queries) UpdateAuthorByID(ctx context.Context, arg UpdateAuthorByIDParams) (Author, error) {
 	var i Author
-	err := q.retrier(ctx, func(ctx context.Context, db DBTX) error {
-		row := db.QueryRowContext(ctx, updateAuthorByID, arg.P0, arg.P1, arg.P2)
+	err := retry.Do(ctx, q.db, func(ctx context.Context, conn *sql.Conn) error {
+		row := q.db.QueryRowContext(ctx, updateAuthorByID, arg.P0, arg.P1, arg.P2)
 		err := row.Scan(&i.ID, &i.Name, &i.Bio)
 		return err
 	})

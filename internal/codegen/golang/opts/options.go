@@ -132,6 +132,10 @@ func parseOpts(req *plugin.GenerateRequest) (*Options, error) {
 		options.InitialismsMap[initial] = struct{}{}
 	}
 
+	if req.Settings.Engine == "ydb" && (options.SqlPackage == "" || options.SqlPackage == "database/sql") {
+		options.EnableYDBRetry = true
+	}
+
 	return &options, nil
 }
 

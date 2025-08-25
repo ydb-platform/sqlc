@@ -138,10 +138,6 @@ func (i *importer) dbImports() fileImports {
 			std = append(std, ImportSpec{Path: "fmt"})
 		}
 	}
-	
-	if i.Options.EnableYDBRetry {
-		pkg = append(pkg, ImportSpec{Path: "github.com/ydb-platform/ydb-go-sdk/v3/retry"})
-	}
 
 	sort.Slice(std, func(i, j int) bool { return std[i].Path < std[j].Path })
 	sort.Slice(pkg, func(i, j int) bool { return pkg[i].Path < pkg[j].Path })
@@ -408,6 +404,10 @@ func (i *importer) queryImports(filename string) fileImports {
 
 	if i.Options.WrapErrors {
 		std["fmt"] = struct{}{}
+	}
+	
+	if i.Options.EnableYDBRetry {
+		pkg[ImportSpec{Path: "github.com/ydb-platform/ydb-go-sdk/v3/retry"}] = struct{}{}
 	}
 
 	return sortedImports(std, pkg)
