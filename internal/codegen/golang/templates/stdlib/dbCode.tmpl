@@ -1,4 +1,5 @@
 {{define "dbCodeTemplateStd"}}
+
 type DBTX interface {
 	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
 	PrepareContext(context.Context, string) (*sql.Stmt, error)
@@ -6,6 +7,14 @@ type DBTX interface {
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }
 
+{{ if $.EnableYDBRetry }}
+func New(db *sql.DB) *Queries {
+	return &Queries{
+        {{- if not .EmitMethodsWithDBArgument}}
+	    db: db,
+		{{- end}}
+	}
+{{- else -}}
 {{ if .EmitMethodsWithDBArgument}}
 func New() *Queries {
 	return &Queries{}
@@ -13,10 +22,11 @@ func New() *Queries {
 func New(db DBTX) *Queries {
 	return &Queries{db: db}
 {{- end}}
+{{- end}}
 }
 
 {{if .EmitPreparedQueries}}
-func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
+func Prepare(ctx context.Context, {{if $.EnableYDBRetry}}db *sql.DB {{else}}db DBTX {{end}}) (*Queries, error) {
 	q := Queries{db: db}
 	var err error
 	{{- if eq (len .GoQueries) 0 }}
@@ -77,12 +87,21 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 {{end}}
 
 type Queries struct {
+    {{- if $.EnableYDBRetry }}
+    {{- if not .EmitMethodsWithDBArgument}}
+	db *sql.DB
+	tx *sql.Tx
+	{{- end}}
+    {{- else }}
     {{- if not .EmitMethodsWithDBArgument}}
 	db DBTX
     {{- end}}
+    {{- end}}
 
     {{- if .EmitPreparedQueries}}
+    {{- if not $.EnableYDBRetry }}
 	tx         *sql.Tx
+    {{- end}}
 	{{- range .GoQueries}}
 	{{.FieldName}}  *sql.Stmt
 	{{- end}}
@@ -92,9 +111,15 @@ type Queries struct {
 {{if not .EmitMethodsWithDBArgument}}
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
+		{{- if .EnableYDBRetry}}
+		db: q.db,
+		{{- else}}
 		db: tx,
-     	{{- if .EmitPreparedQueries}}
+		{{- end}}
+		{{- if or .EnableYDBRetry .EmitPreparedQueries}}
 		tx: tx,
+		{{- end}}
+		{{- if .EmitPreparedQueries }}
 		{{- range .GoQueries}}
 		{{.FieldName}}: q.{{.FieldName}},
 		{{- end}}

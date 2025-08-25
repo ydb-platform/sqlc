@@ -16,16 +16,20 @@ type DBTX interface {
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }
 
-func New(db DBTX) *Queries {
-	return &Queries{db: db}
+func New(db *sql.DB) *Queries {
+	return &Queries{
+		db: db,
+	}
 }
 
 type Queries struct {
-	db DBTX
+	db *sql.DB
+	tx *sql.Tx
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
-		db: tx,
+		db: q.db,
+		tx: tx,
 	}
 }

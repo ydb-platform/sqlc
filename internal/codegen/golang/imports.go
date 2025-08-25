@@ -405,6 +405,10 @@ func (i *importer) queryImports(filename string) fileImports {
 	if i.Options.WrapErrors {
 		std["fmt"] = struct{}{}
 	}
+	
+	if i.Options.EnableYDBRetry {
+		pkg[ImportSpec{Path: "github.com/ydb-platform/ydb-go-sdk/v3/retry"}] = struct{}{}
+	}
 
 	return sortedImports(std, pkg)
 }

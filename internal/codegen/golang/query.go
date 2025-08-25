@@ -267,6 +267,11 @@ type Query struct {
 	Arg          QueryValue
 	// Used for :copyfrom
 	Table *plugin.Identifier
+	
+	// YDB specific
+	RetryMode     string
+    RetryOptions  string
+    TxOptions     string
 }
 
 func (q Query) hasRetType() bool {

@@ -22,25 +22,87 @@ type {{.Ret.Type}} struct { {{- range .Ret.Struct.Fields}}
 {{if eq .Cmd ":one"}}
 {{range .Comments}}//{{.}}
 {{end -}}
+{{- if and ($.EnableYDBRetry) (or (eq .RetryMode "dotx") (eq .RetryMode "do") ) }}
 func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}) ({{.Ret.DefineType}}, error) {
-    {{- template "queryCodeStdExec" . }}
-	{{- if or (ne .Arg.Pair .Ret.Pair) (ne .Arg.DefineType .Ret.DefineType) }}
-	var {{.Ret.Name}} {{.Ret.Type}}
-	{{- end}}
-	err := row.Scan({{.Ret.Scan}})
-	{{- if $.WrapErrors}}
-	if err != nil {
-		err = fmt.Errorf("query {{.MethodName}}: %w", err)
-	}
-	{{- end}}
-	return {{.Ret.ReturnName}}, err
+    {{- if or (ne .Arg.Pair .Ret.Pair) (ne .Arg.DefineType .Ret.DefineType) }}
+    var {{.Ret.Name}} {{.Ret.Type}}
+    {{- end}}
+    {{- if eq .RetryMode "dotx" }}
+    err := retry.DoTx(ctx, {{if $.EmitMethodsWithDBArgument}}db{{else}}q.db{{end}}, func(ctx context.Context, tx *sql.Tx) error {
+    {{- else }}
+    err := retry.Do(ctx, {{if $.EmitMethodsWithDBArgument}}db{{else}}q.db{{end}}, func(ctx context.Context, conn *sql.Conn) error {
+    {{- end }}
+        {{- template "queryCodeStdExec" . }}
+        err := row.Scan({{.Ret.Scan}})
+        return err
+    }{{.RetryOptions}})
+    {{- if $.WrapErrors}}
+    if err != nil {
+        err = fmt.Errorf("query {{.MethodName}}: %w", err)
+    }
+    {{- end}}
+    return {{.Ret.ReturnName}}, err
 }
+{{- else }}
+func (q *Queries) {{.MethodName}}(ctx context.Context, {{if and $.EmitMethodsWithDBArgument (and ($.EnableYDBRetry) (eq .RetryMode "direct")) }} tx *sql.Tx, {{else}} {{ dbarg }} {{end}} {{.Arg.Pair}}) ({{.Ret.DefineType}}, error) {
+    {{- template "queryCodeStdExec" . }}
+    {{- if or (ne .Arg.Pair .Ret.Pair) (ne .Arg.DefineType .Ret.DefineType) }}
+    var {{.Ret.Name}} {{.Ret.Type}}
+    {{- end}}
+    err := row.Scan({{.Ret.Scan}})
+    {{- if $.WrapErrors}}
+    if err != nil {
+        err = fmt.Errorf("query {{.MethodName}}: %w", err)
+    }
+    {{- end}}
+    return {{.Ret.ReturnName}}, err
+}
+{{- end}}
 {{end}}
 
 {{if eq .Cmd ":many"}}
 {{range .Comments}}//{{.}}
 {{end -}}
+{{- if and ($.EnableYDBRetry) (or (eq .RetryMode "dotx") (eq .RetryMode "do") ) }}
 func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}) ([]{{.Ret.DefineType}}, error) {
+    var items []{{.Ret.DefineType}}
+    
+    {{- if eq .RetryMode "dotx" }}
+    err := retry.DoTx(ctx, {{if $.EmitMethodsWithDBArgument}}db{{else}}q.db{{end}}, func(ctx context.Context, tx *sql.Tx) error {
+    {{- else }}
+    err := retry.Do(ctx, {{if $.EmitMethodsWithDBArgument}}db{{else}}q.db{{end}}, func(ctx context.Context, conn *sql.Conn) error {
+    {{- end }}
+        {{- if $.EmitEmptySlices}}
+        items = []{{.Ret.DefineType}}{}
+        {{else}}
+        items = nil
+        {{end -}}
+        
+        {{- template "queryCodeStdExec" . }}
+        if err != nil {
+            return err
+        }
+        defer rows.Close()
+        for rows.Next() {
+            var {{.Ret.Name}} {{.Ret.Type}}
+            if err := rows.Scan({{.Ret.Scan}}); err != nil {
+                return err
+            }
+            items = append(items, {{.Ret.ReturnName}})
+        }
+        if err := rows.Close(); err != nil {
+            return err
+        }
+        
+        return rows.Err()
+    }{{.RetryOptions}})
+    if err != nil {
+        return nil, {{if $.WrapErrors}}fmt.Errorf("query {{.MethodName}}: %w", err){{else}}err{{end}}
+    }
+    return items, nil
+}
+{{- else }}
+func (q *Queries) {{.MethodName}}(ctx context.Context, {{if and $.EmitMethodsWithDBArgument (and ($.EnableYDBRetry) (eq .RetryMode "direct")) }} tx *sql.Tx, {{else}} {{ dbarg }} {{end}} {{.Arg.Pair}}) ([]{{.Ret.DefineType}}, error) {
     {{- template "queryCodeStdExec" . }}
     if err != nil {
         return nil, {{if $.WrapErrors}}fmt.Errorf("query {{.MethodName}}: %w", err){{else}}err{{end}}
@@ -66,12 +128,31 @@ func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}
     }
     return items, nil
 }
+{{- end }}
 {{end}}
 
 {{if eq .Cmd ":exec"}}
 {{range .Comments}}//{{.}}
 {{end -}}
+{{- if and ($.EnableYDBRetry) (or (eq .RetryMode "dotx") (eq .RetryMode "do") ) }}
 func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}) error {
+    {{- if eq .RetryMode "dotx" }}
+    err := retry.DoTx(ctx, {{if $.EmitMethodsWithDBArgument}}db{{else}}q.db{{end}}, func(ctx context.Context, tx *sql.Tx) error {
+    {{- else }}
+    err := retry.Do(ctx, {{if $.EmitMethodsWithDBArgument}}db{{else}}q.db{{end}}, func(ctx context.Context, conn *sql.Conn) error {
+    {{- end }}
+        {{- template "queryCodeStdExec" . }}
+        return err
+    }{{.RetryOptions}})
+    {{- if $.WrapErrors}}
+    if err != nil {
+        err = fmt.Errorf("query {{.MethodName}}: %w", err)
+    }
+    {{- end}}
+    return err
+}
+{{- else}}
+func (q *Queries) {{.MethodName}}(ctx context.Context, {{if and $.EmitMethodsWithDBArgument (and ($.EnableYDBRetry) (eq .RetryMode "direct")) }} tx *sql.Tx, {{else}} {{ dbarg }} {{end}} {{.Arg.Pair}}) error {
     {{- template "queryCodeStdExec" . }}
     {{- if $.WrapErrors}}
     if err != nil {
@@ -80,6 +161,7 @@ func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}
     {{- end}}
     return err
 }
+{{- end}}
 {{end}}
 
 {{if eq .Cmd ":execrows"}}
@@ -109,7 +191,30 @@ func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}
 {{if eq .Cmd ":execresult"}}
 {{range .Comments}}//{{.}}
 {{end -}}
+{{- if and ($.EnableYDBRetry) (or (eq .RetryMode "dotx") (eq .RetryMode "do")) }}
 func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}) (sql.Result, error) {
+    var sqlResult sql.Result
+    
+    {{- if eq .RetryMode "dotx" }} 
+    err := retry.DoTx(ctx, {{if $.EmitMethodsWithDBArgument}}db{{else}}q.db{{end}}, func(ctx context.Context, tx *sql.Tx) error {
+    {{- else }}
+    err := retry.Do(ctx, {{if $.EmitMethodsWithDBArgument}}db{{else}}q.db{{end}}, func(ctx context.Context, conn *sql.Conn) error {
+    {{- end }}
+        {{- template "queryCodeStdExec" . }}
+        
+        sqlResult = result
+        return err
+    }{{.RetryOptions}})
+    
+    {{- if $.WrapErrors}}
+    if err != nil {
+        return nil, fmt.Errorf("query {{.MethodName}}: %w", err)
+    }
+    {{- end}}
+    return sqlResult, err
+}
+{{- else}}
+func (q *Queries) {{.MethodName}}(ctx context.Context, {{if and ($.EnableYDBRetry) (eq .RetryMode "direct") }} tx *sql.Tx, {{else}}{{ dbarg }}{{end}}  {{.Arg.Pair}}) (sql.Result, error) {
     {{- template "queryCodeStdExec" . }}
     {{- if $.WrapErrors}}
     if err != nil {
@@ -118,6 +223,7 @@ func (q *Queries) {{.MethodName}}(ctx context.Context, {{ dbarg }} {{.Arg.Pair}}
     return result, err
     {{- end}}
 }
+{{- end}}
 {{end}}
 
 {{end}}

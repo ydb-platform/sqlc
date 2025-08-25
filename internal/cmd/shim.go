@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"strings"
+
 	"github.com/sqlc-dev/sqlc/internal/compiler"
 	"github.com/sqlc-dev/sqlc/internal/config"
 	"github.com/sqlc-dev/sqlc/internal/config/convert"
@@ -152,11 +154,24 @@ func pluginQueries(r *compiler.Result) []*plugin.Query {
 				Name:    q.InsertIntoTable.Name,
 			}
 		}
+		// Include YDB metadata in comments for codegen access
+		comments := q.Metadata.Comments
+		for flag := range q.Metadata.Flags {
+			if strings.HasPrefix(flag, "@ydb-") {
+				comments = append(comments, "YDB_FLAG:"+flag)
+			}
+		}
+		for param, value := range q.Metadata.Params {
+			if strings.HasPrefix(param, "@ydb-") {
+				comments = append(comments, "YDB_PARAM:"+param+"="+value)
+			}
+		}
+
 		out = append(out, &plugin.Query{
 			Name:            q.Metadata.Name,
 			Cmd:             q.Metadata.Cmd,
 			Text:            q.SQL,
-			Comments:        q.Metadata.Comments,
+			Comments:        comments,
 			Columns:         columns,
 			Params:          params,
 			Filename:        q.Metadata.Filename,
