@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math/rand"
-	"net"
 	"os"
 	"testing"
 	"time"
@@ -38,10 +37,6 @@ func link_YDB(t *testing.T, migrations []string, rw bool) *ydb.Driver {
 	dbuiri := os.Getenv("YDB_SERVER_URI")
 	if dbuiri == "" {
 		t.Skip("YDB_SERVER_URI is empty")
-	}
-	host, _, err := net.SplitHostPort(dbuiri)
-	if err != nil {
-		t.Fatalf("invalid YDB_SERVER_URI: %q", dbuiri)
 	}
 
 	baseDB := os.Getenv("YDB_DATABASE")
@@ -77,9 +72,6 @@ func link_YDB(t *testing.T, migrations []string, rw bool) *ydb.Driver {
 	db, err := ydb.Open(ctx, connectionString,
 		ydb.WithInsecure(),
 		ydb.WithDiscoveryInterval(time.Hour),
-		ydb.WithNodeAddressMutator(func(_ string) string {
-			return host
-		}),
 	)
 	if err != nil {
 		t.Fatalf("failed to open YDB connection: %s", err)

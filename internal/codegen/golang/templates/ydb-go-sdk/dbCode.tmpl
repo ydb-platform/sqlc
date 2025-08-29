@@ -1,4 +1,4 @@
-{{define "dbCodeYDB"}}
+{{define "dbCodeTemplateYDB"}}
 type DBTX interface {
     Exec(ctx context.Context, sql string, opts ...query.ExecuteOption) error
 	Query(ctx context.Context, sql string, opts ...query.ExecuteOption) (query.Result, error)

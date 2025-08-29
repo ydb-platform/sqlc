@@ -273,28 +273,39 @@ func (v QueryValue) YDBParamMapEntries() string {
 	if v.isEmpty() {
 		return ""
 	}
+
 	var parts []string
-	if v.Struct == nil {
-		if v.Column != nil && v.Column.IsNamedParam {
-			name := v.Column.GetName()
+	for _, field := range v.getParameterFields() {
+		if field.Column != nil && field.Column.IsNamedParam {
+			name := field.Column.GetName()
 			if name != "" {
 				key := fmt.Sprintf("%q", addDollarPrefix(name))
-				parts = append(parts, key+": "+escape(v.Name))
-			}
-		}
-	} else {
-		for _, f := range v.Struct.Fields {
-			if f.Column != nil && f.Column.IsNamedParam {
-				name := f.Column.GetName()
-				if name != "" {
-					key := fmt.Sprintf("%q", addDollarPrefix(name))
-					parts = append(parts, key+": "+escape(v.VariableForField(f)))
-				}
+				variable := v.VariableForField(field)
+				parts = append(parts, key+": "+escape(variable))
 			}
 		}
 	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
 	parts = append(parts, "")
 	return "\n" + strings.Join(parts, ",\n")
+}
+
+func (v QueryValue) getParameterFields() []Field {
+	if v.Struct == nil {
+		return []Field{
+			{
+				Name:   v.Name,
+				DBName: v.DBName,
+				Type:   v.Typ,
+				Column: v.Column,
+			},
+		}
+	}
+	return v.Struct.Fields
 }
 
 // A struct used to generate methods and fields on the Queries struct
