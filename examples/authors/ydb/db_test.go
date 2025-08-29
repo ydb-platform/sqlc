@@ -75,7 +75,7 @@ func TestAuthors(t *testing.T) {
 			P2: 10,
 		}
 
-		authors, err := q.UpdateAuthorByID(ctx, arg, query.WithIdempotent(), query.WithIdempotent())
+		authors, err := q.UpdateAuthorByID(ctx, arg, query.WithIdempotent())
 		if err != nil {
 			t.Fatal(err)
 		}
