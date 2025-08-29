@@ -32,11 +32,11 @@
         {{- if and (eq .Cmd ":queryrows") ($dbtxParam) }}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, db DBTX, {{if not .Arg.IsEmpty}}{{.Arg.Pair}}, {{end}}opts ...query.ExecuteOption) ([]Author, error)
+            {{.MethodName}}(ctx context.Context, db DBTX, {{if not .Arg.IsEmpty}}{{.Arg.Pair}}, {{end}}opts ...query.ExecuteOption) ([]{{.Ret.DefineType}}, error)
         {{- else if eq .Cmd ":queryrows"}}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, {{if not .Arg.IsEmpty}}{{.Arg.Pair}}, {{end}}opts ...query.ExecuteOption) ([]Author, error)
+            {{.MethodName}}(ctx context.Context, {{if not .Arg.IsEmpty}}{{.Arg.Pair}}, {{end}}opts ...query.ExecuteOption) ([]{{.Ret.DefineType}}, error)
         {{- end}}
     {{- end}}
     }
