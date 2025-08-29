@@ -17,8 +17,8 @@ const count = `-- name: Count :one
 SELECT COUNT(*) FROM authors
 `
 
-func (q *Queries) Count(ctx context.Context, db DBTX, opts ...query.ExecuteOption) (uint64, error) {
-	row, err := db.QueryRow(ctx, count, opts...)
+func (q *Queries) Count(ctx context.Context, opts ...query.ExecuteOption) (uint64, error) {
+	row, err := q.db.QueryRow(ctx, count, opts...)
 	var count uint64
 	if err != nil {
 		return count, xerrors.WithStackTrace(err)
@@ -34,8 +34,8 @@ const deleteAuthor = `-- name: DeleteAuthor :exec
 DELETE FROM authors WHERE id = $p0
 `
 
-func (q *Queries) DeleteAuthor(ctx context.Context, db DBTX, p0 uint64, opts ...query.ExecuteOption) error {
-	err := db.Exec(ctx, deleteAuthor,
+func (q *Queries) DeleteAuthor(ctx context.Context, p0 uint64, opts ...query.ExecuteOption) error {
+	err := q.db.Exec(ctx, deleteAuthor,
 		append(opts, query.WithParameters(ydb.ParamsFromMap(map[string]any{
 			"$p0": p0,
 		})))...,
@@ -51,8 +51,8 @@ SELECT id, name, bio FROM authors
 WHERE id = $p0
 `
 
-func (q *Queries) GetAuthor(ctx context.Context, db DBTX, p0 uint64, opts ...query.ExecuteOption) (Author, error) {
-	row, err := db.QueryRow(ctx, getAuthor,
+func (q *Queries) GetAuthor(ctx context.Context, p0 uint64, opts ...query.ExecuteOption) (Author, error) {
+	row, err := q.db.QueryRow(ctx, getAuthor,
 		append(opts, query.WithParameters(ydb.ParamsFromMap(map[string]any{
 			"$p0": p0,
 		})))...,
@@ -73,8 +73,8 @@ SELECT id, name, bio FROM authors
 WHERE name = $p0
 `
 
-func (q *Queries) GetAuthorsByName(ctx context.Context, db DBTX, p0 string, opts ...query.ExecuteOption) ([]Author, error) {
-	res, err := db.QueryResultSet(ctx, getAuthorsByName,
+func (q *Queries) GetAuthorsByName(ctx context.Context, p0 string, opts ...query.ExecuteOption) ([]Author, error) {
+	res, err := q.db.QueryResultSet(ctx, getAuthorsByName,
 		append(opts, query.WithParameters(ydb.ParamsFromMap(map[string]any{
 			"$p0": p0,
 		})))...,
@@ -100,8 +100,8 @@ const listAuthors = `-- name: ListAuthors :many
 SELECT id, name, bio FROM authors
 `
 
-func (q *Queries) ListAuthors(ctx context.Context, db DBTX, opts ...query.ExecuteOption) ([]Author, error) {
-	res, err := db.QueryResultSet(ctx, listAuthors, opts...)
+func (q *Queries) ListAuthors(ctx context.Context, opts ...query.ExecuteOption) ([]Author, error) {
+	res, err := q.db.QueryResultSet(ctx, listAuthors, opts...)
 	if err != nil {
 		return nil, xerrors.WithStackTrace(err)
 	}
@@ -124,8 +124,8 @@ SELECT id, name, bio FROM authors
 WHERE bio IS NULL
 `
 
-func (q *Queries) ListAuthorsWithNullBio(ctx context.Context, db DBTX, opts ...query.ExecuteOption) ([]Author, error) {
-	res, err := db.QueryResultSet(ctx, listAuthorsWithNullBio, opts...)
+func (q *Queries) ListAuthorsWithNullBio(ctx context.Context, opts ...query.ExecuteOption) ([]Author, error) {
+	res, err := q.db.QueryResultSet(ctx, listAuthorsWithNullBio, opts...)
 	if err != nil {
 		return nil, xerrors.WithStackTrace(err)
 	}
@@ -153,8 +153,8 @@ type UpdateAuthorByIDParams struct {
 	P2 uint64  `json:"p2"`
 }
 
-func (q *Queries) UpdateAuthorByID(ctx context.Context, db DBTX, arg UpdateAuthorByIDParams, opts ...query.ExecuteOption) (Author, error) {
-	row, err := db.QueryRow(ctx, updateAuthorByID,
+func (q *Queries) UpdateAuthorByID(ctx context.Context, arg UpdateAuthorByIDParams, opts ...query.ExecuteOption) (Author, error) {
+	row, err := q.db.QueryRow(ctx, updateAuthorByID,
 		append(opts, query.WithParameters(ydb.ParamsFromMap(map[string]any{
 			"$p0": arg.P0,
 			"$p1": arg.P1,
@@ -182,8 +182,8 @@ type UpsertAuthorParams struct {
 	P2 *string `json:"p2"`
 }
 
-func (q *Queries) UpsertAuthor(ctx context.Context, db DBTX, arg UpsertAuthorParams, opts ...query.ExecuteOption) ([]Author, error) {
-	result, err := db.Query(ctx, upsertAuthor,
+func (q *Queries) UpsertAuthor(ctx context.Context, arg UpsertAuthorParams, opts ...query.ExecuteOption) ([]Author, error) {
+	result, err := q.db.Query(ctx, upsertAuthor,
 		append(opts, query.WithParameters(ydb.ParamsFromMap(map[string]any{
 			"$p0": arg.P0,
 			"$p1": arg.P1,

@@ -17,9 +17,10 @@ type DBTX interface {
 	QueryRow(ctx context.Context, sql string, opts ...query.ExecuteOption) (query.Row, error)
 }
 
-func New() *Queries {
-	return &Queries{}
+func New(db DBTX) *Queries {
+	return &Queries{db: db}
 }
 
 type Queries struct {
+	db DBTX
 }
