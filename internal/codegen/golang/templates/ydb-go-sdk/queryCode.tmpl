@@ -173,7 +173,6 @@ func (q *Queries) {{.MethodName}}(ctx context.Context, {{if $.EmitMethodsWithDBA
     {{else}}
     var items []{{.Ret.DefineType}}
     {{end -}}
-    
     for set, err := range result.ResultSets(ctx) {
 		if err != nil {
 			{{- if $.WrapErrors}}
