@@ -6,6 +6,7 @@ import (
 
 	"github.com/sqlc-dev/sqlc/internal/sqltest/local"
 	_ "github.com/ydb-platform/ydb-go-sdk/v3"
+	"github.com/ydb-platform/ydb-go-sdk/v3/query"
 )
 
 func ptr(s string) *string {
@@ -15,10 +16,10 @@ func ptr(s string) *string {
 func TestAuthors(t *testing.T) {
 	ctx := context.Background()
 
-	test := local.YDB(t, []string{"schema.sql"})
-	defer test.DB.Close()
+	db := local.YDB(t, []string{"schema.sql"})
+	defer db.Close(ctx)
 
-	q := New(test.DB)
+	q := New(db.Query())
 
 	t.Run("InsertAuthors", func(t *testing.T) {
 		authorsToInsert := []CreateOrUpdateAuthorParams{
@@ -38,7 +39,7 @@ func TestAuthors(t *testing.T) {
 		}
 
 		for _, author := range authorsToInsert {
-			if _, err := q.CreateOrUpdateAuthor(ctx, author); err != nil {
+			if err := q.CreateOrUpdateAuthor(ctx, author, query.WithIdempotent()); err != nil {
 				t.Fatalf("failed to insert author %q: %v", author.P1, err)
 			}
 		}
@@ -52,7 +53,7 @@ func TestAuthors(t *testing.T) {
 			P2: &newBio,
 		}
 
-		returnedBio, err := q.CreateOrUpdateAuthorReturningBio(ctx, arg)
+		returnedBio, err := q.CreateOrUpdateAuthorReturningBio(ctx, arg, query.WithIdempotent())
 		if err != nil {
 			t.Fatalf("failed to create or update author: %v", err)
 		}
@@ -74,15 +75,17 @@ func TestAuthors(t *testing.T) {
 			P2: 10,
 		}
 
-		singleAuthor, err := q.UpdateAuthorByID(ctx, arg)
+		authors, err := q.UpdateAuthorByID(ctx, arg, query.WithIdempotent(), query.WithIdempotent())
 		if err != nil {
 			t.Fatal(err)
 		}
-		bio := "Null"
-		if singleAuthor.Bio != nil {
-			bio = *singleAuthor.Bio
+		for _, a := range authors {
+			bio := "Null"
+			if a.Bio != nil {
+				bio = *a.Bio
+			}
+			t.Logf("- ID: %d | Name: %s | Bio: %s", a.ID, a.Name, bio)
 		}
-		t.Logf("- ID: %d | Name: %s | Bio: %s", singleAuthor.ID, singleAuthor.Name, bio)
 	})
 
 	t.Run("ListAuthors", func(t *testing.T) {
@@ -154,7 +157,7 @@ func TestAuthors(t *testing.T) {
 	t.Run("Delete All Authors", func(t *testing.T) {
 		var i uint64
 		for i = 1; i <= 13; i++ {
-			if err := q.DeleteAuthor(ctx, i); err != nil {
+			if err := q.DeleteAuthor(ctx, i, query.WithIdempotent()); err != nil {
 				t.Fatalf("failed to delete authors: %v", err)
 			}
 		}

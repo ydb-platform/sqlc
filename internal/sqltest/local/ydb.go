@@ -2,7 +2,6 @@ package local
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"hash/fnv"
 	"math/rand"
@@ -14,29 +13,24 @@ import (
 	migrate "github.com/sqlc-dev/sqlc/internal/migrations"
 	"github.com/sqlc-dev/sqlc/internal/sql/sqlpath"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
+	"github.com/ydb-platform/ydb-go-sdk/v3/query"
+	"github.com/ydb-platform/ydb-go-sdk/v3/sugar"
 )
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-func YDB(t *testing.T, migrations []string) TestYDB {
+func YDB(t *testing.T, migrations []string) *ydb.Driver {
 	return link_YDB(t, migrations, true)
 }
 
-func ReadOnlyYDB(t *testing.T, migrations []string) TestYDB {
+func ReadOnlyYDB(t *testing.T, migrations []string) *ydb.Driver {
 	return link_YDB(t, migrations, false)
 }
 
-type TestYDB struct {
-	DB     *sql.DB
-	Prefix string
-}
-
-func link_YDB(t *testing.T, migrations []string, rw bool) TestYDB {
+func link_YDB(t *testing.T, migrations []string, rw bool) *ydb.Driver {
 	t.Helper()
-
-	time.Sleep(1 * time.Second) // wait for YDB to start
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -72,16 +66,15 @@ func link_YDB(t *testing.T, migrations []string, rw bool) TestYDB {
 
 	var name string
 	if rw {
-		// name = fmt.Sprintf("sqlc_test_%s", id())
 		name = fmt.Sprintf("sqlc_test_%s", "test_new")
 	} else {
 		name = fmt.Sprintf("sqlc_test_%x", h.Sum(nil))
 	}
-	prefix := fmt.Sprintf("%s/%s", baseDB, name)
 
-	rootDSN := fmt.Sprintf("grpc://%s?database=%s", dbuiri, baseDB)
-	t.Logf("→ Opening root driver: %s", rootDSN)
-	driver, err := ydb.Open(ctx, rootDSN,
+	connectionString := fmt.Sprintf("grpc://%s%s", dbuiri, baseDB)
+	t.Logf("→ Opening YDB connection: %s", connectionString)
+
+	db, err := ydb.Open(ctx, connectionString,
 		ydb.WithInsecure(),
 		ydb.WithDiscoveryInterval(time.Hour),
 		ydb.WithNodeAddressMutator(func(_ string) string {
@@ -89,29 +82,27 @@ func link_YDB(t *testing.T, migrations []string, rw bool) TestYDB {
 		}),
 	)
 	if err != nil {
-		t.Fatalf("failed to open root YDB connection: %s", err)
+		t.Fatalf("failed to open YDB connection: %s", err)
 	}
 
-	connector, err := ydb.Connector(
-		driver,
-		ydb.WithTablePathPrefix(prefix),
-		ydb.WithAutoDeclare(),
-		ydb.WithNumericArgs(),
-	)
+	prefix := fmt.Sprintf("%s/%s", baseDB, name)
+	t.Logf("→ Using prefix: %s", prefix)
+
+	err = sugar.RemoveRecursive(ctx, db, prefix)
 	if err != nil {
-		t.Fatalf("failed to create connector: %s", err)
+		t.Logf("Warning: failed to remove old data: %s", err)
 	}
-
-	db := sql.OpenDB(connector)
 
 	t.Log("→ Applying migrations to prefix: ", prefix)
 
-	schemeCtx := ydb.WithQueryMode(ctx, ydb.SchemeQueryMode)
 	for _, stmt := range seed {
-		_, err := db.ExecContext(schemeCtx, stmt)
+		err := db.Query().Exec(ctx, stmt,
+			query.WithTxControl(query.EmptyTxControl()),
+		)
 		if err != nil {
 			t.Fatalf("failed to apply migration: %s\nSQL: %s", err, stmt)
 		}
 	}
-	return TestYDB{DB: db, Prefix: prefix}
+
+	return db
 }
