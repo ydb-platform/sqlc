@@ -39,6 +39,7 @@ type tmplCtx struct {
 	EmitAllEnumValues         bool
 	UsesCopyFrom              bool
 	UsesBatch                 bool
+	UsesQueryRows             bool
 	OmitSqlcVersion           bool
 	BuildTags                 string
 	WrapErrors                bool
@@ -183,6 +184,7 @@ func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, 
 		EmitAllEnumValues:         options.EmitAllEnumValues,
 		UsesCopyFrom:              usesCopyFrom(queries),
 		UsesBatch:                 usesBatch(queries),
+		UsesQueryRows:             usesQueryRows(queries),
 		SQLDriver:                 parseDriver(options.SqlPackage),
 		Q:                         "`",
 		Package:                   options.Package,
@@ -207,6 +209,10 @@ func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, 
 
 	if tctx.UsesBatch && !tctx.SQLDriver.IsPGX() {
 		return nil, errors.New(":batch* commands are only supported by pgx")
+	}
+
+	if tctx.UsesQueryRows && tctx.SQLDriver != opts.SQLDriverYDBGoSDK {
+		return nil, errors.New(":queryrows commands are only supported by ydb-go-sdk")
 	}
 
 	funcMap := template.FuncMap{
@@ -348,6 +354,15 @@ func usesBatch(queries []Query) bool {
 			if q.Cmd == cmd {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func usesQueryRows(queries []Query) bool {
+	for _, q := range queries {
+		if q.Cmd == metadata.CmdQueryRows {
+			return true
 		}
 	}
 	return false

@@ -7,91 +7,43 @@ package authors
 
 import (
 	"context"
-	"database/sql"
+
+	"github.com/ydb-platform/ydb-go-sdk/v3"
+	"github.com/ydb-platform/ydb-go-sdk/v3/pkg/xerrors"
+	"github.com/ydb-platform/ydb-go-sdk/v3/query"
 )
-
-const cOALESCE = `-- name: COALESCE :many
-SELECT id, name, COALESCE(bio, 'Null value!') FROM authors
-`
-
-type COALESCERow struct {
-	ID   uint64 `json:"id"`
-	Name string `json:"name"`
-	Bio  string `json:"bio"`
-}
-
-func (q *Queries) COALESCE(ctx context.Context) ([]COALESCERow, error) {
-	rows, err := q.db.QueryContext(ctx, cOALESCE)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []COALESCERow
-	for rows.Next() {
-		var i COALESCERow
-		if err := rows.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
 
 const count = `-- name: Count :one
 SELECT COUNT(*) FROM authors
 `
 
-func (q *Queries) Count(ctx context.Context) (uint64, error) {
-	row := q.db.QueryRowContext(ctx, count)
+func (q *Queries) Count(ctx context.Context, db DBTX, opts ...query.ExecuteOption) (uint64, error) {
+	row, err := db.QueryRow(ctx, count, opts...)
 	var count uint64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const createOrUpdateAuthor = `-- name: CreateOrUpdateAuthor :execresult
-UPSERT INTO authors (id, name, bio) VALUES ($p0, $p1, $p2)
-`
-
-type CreateOrUpdateAuthorParams struct {
-	P0 uint64  `json:"p0"`
-	P1 string  `json:"p1"`
-	P2 *string `json:"p2"`
-}
-
-func (q *Queries) CreateOrUpdateAuthor(ctx context.Context, arg CreateOrUpdateAuthorParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, createOrUpdateAuthor, arg.P0, arg.P1, arg.P2)
-}
-
-const createOrUpdateAuthorReturningBio = `-- name: CreateOrUpdateAuthorReturningBio :one
-UPSERT INTO authors (id, name, bio) VALUES ($p0, $p1, $p2) RETURNING bio
-`
-
-type CreateOrUpdateAuthorReturningBioParams struct {
-	P0 uint64  `json:"p0"`
-	P1 string  `json:"p1"`
-	P2 *string `json:"p2"`
-}
-
-func (q *Queries) CreateOrUpdateAuthorReturningBio(ctx context.Context, arg CreateOrUpdateAuthorReturningBioParams) (*string, error) {
-	row := q.db.QueryRowContext(ctx, createOrUpdateAuthorReturningBio, arg.P0, arg.P1, arg.P2)
-	var bio *string
-	err := row.Scan(&bio)
-	return bio, err
+	if err != nil {
+		return count, xerrors.WithStackTrace(err)
+	}
+	err = row.Scan(&count)
+	if err != nil {
+		return count, xerrors.WithStackTrace(err)
+	}
+	return count, nil
 }
 
 const deleteAuthor = `-- name: DeleteAuthor :exec
 DELETE FROM authors WHERE id = $p0
 `
 
-func (q *Queries) DeleteAuthor(ctx context.Context, p0 uint64) error {
-	_, err := q.db.ExecContext(ctx, deleteAuthor, p0)
-	return err
+func (q *Queries) DeleteAuthor(ctx context.Context, db DBTX, p0 uint64, opts ...query.ExecuteOption) error {
+	err := db.Exec(ctx, deleteAuthor,
+		append(opts, query.WithParameters(ydb.ParamsFromMap(map[string]any{
+			"$p0": p0,
+		})))...,
+	)
+	if err != nil {
+		return xerrors.WithStackTrace(err)
+	}
+	return nil
 }
 
 const getAuthor = `-- name: GetAuthor :one
@@ -99,11 +51,21 @@ SELECT id, name, bio FROM authors
 WHERE id = $p0
 `
 
-func (q *Queries) GetAuthor(ctx context.Context, p0 uint64) (Author, error) {
-	row := q.db.QueryRowContext(ctx, getAuthor, p0)
+func (q *Queries) GetAuthor(ctx context.Context, db DBTX, p0 uint64, opts ...query.ExecuteOption) (Author, error) {
+	row, err := db.QueryRow(ctx, getAuthor,
+		append(opts, query.WithParameters(ydb.ParamsFromMap(map[string]any{
+			"$p0": p0,
+		})))...,
+	)
 	var i Author
-	err := row.Scan(&i.ID, &i.Name, &i.Bio)
-	return i, err
+	if err != nil {
+		return i, xerrors.WithStackTrace(err)
+	}
+	err = row.Scan(&i.ID, &i.Name, &i.Bio)
+	if err != nil {
+		return i, xerrors.WithStackTrace(err)
+	}
+	return i, nil
 }
 
 const getAuthorsByName = `-- name: GetAuthorsByName :many
@@ -111,25 +73,25 @@ SELECT id, name, bio FROM authors
 WHERE name = $p0
 `
 
-func (q *Queries) GetAuthorsByName(ctx context.Context, p0 string) ([]Author, error) {
-	rows, err := q.db.QueryContext(ctx, getAuthorsByName, p0)
+func (q *Queries) GetAuthorsByName(ctx context.Context, db DBTX, p0 string, opts ...query.ExecuteOption) ([]Author, error) {
+	res, err := db.QueryResultSet(ctx, getAuthorsByName,
+		append(opts, query.WithParameters(ydb.ParamsFromMap(map[string]any{
+			"$p0": p0,
+		})))...,
+	)
 	if err != nil {
-		return nil, err
+		return nil, xerrors.WithStackTrace(err)
 	}
-	defer rows.Close()
 	var items []Author
-	for rows.Next() {
+	for row := range res.Rows(ctx) {
 		var i Author
-		if err := rows.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
-			return nil, err
+		if err := row.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
+			return nil, xerrors.WithStackTrace(err)
 		}
 		items = append(items, i)
 	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+	if err := res.Close(ctx); err != nil {
+		return nil, xerrors.WithStackTrace(err)
 	}
 	return items, nil
 }
@@ -138,25 +100,21 @@ const listAuthors = `-- name: ListAuthors :many
 SELECT id, name, bio FROM authors
 `
 
-func (q *Queries) ListAuthors(ctx context.Context) ([]Author, error) {
-	rows, err := q.db.QueryContext(ctx, listAuthors)
+func (q *Queries) ListAuthors(ctx context.Context, db DBTX, opts ...query.ExecuteOption) ([]Author, error) {
+	res, err := db.QueryResultSet(ctx, listAuthors, opts...)
 	if err != nil {
-		return nil, err
+		return nil, xerrors.WithStackTrace(err)
 	}
-	defer rows.Close()
 	var items []Author
-	for rows.Next() {
+	for row := range res.Rows(ctx) {
 		var i Author
-		if err := rows.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
-			return nil, err
+		if err := row.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
+			return nil, xerrors.WithStackTrace(err)
 		}
 		items = append(items, i)
 	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+	if err := res.Close(ctx); err != nil {
+		return nil, xerrors.WithStackTrace(err)
 	}
 	return items, nil
 }
@@ -166,25 +124,21 @@ SELECT id, name, bio FROM authors
 WHERE bio IS NULL
 `
 
-func (q *Queries) ListAuthorsWithNullBio(ctx context.Context) ([]Author, error) {
-	rows, err := q.db.QueryContext(ctx, listAuthorsWithNullBio)
+func (q *Queries) ListAuthorsWithNullBio(ctx context.Context, db DBTX, opts ...query.ExecuteOption) ([]Author, error) {
+	res, err := db.QueryResultSet(ctx, listAuthorsWithNullBio, opts...)
 	if err != nil {
-		return nil, err
+		return nil, xerrors.WithStackTrace(err)
 	}
-	defer rows.Close()
 	var items []Author
-	for rows.Next() {
+	for row := range res.Rows(ctx) {
 		var i Author
-		if err := rows.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
-			return nil, err
+		if err := row.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
+			return nil, xerrors.WithStackTrace(err)
 		}
 		items = append(items, i)
 	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+	if err := res.Close(ctx); err != nil {
+		return nil, xerrors.WithStackTrace(err)
 	}
 	return items, nil
 }
@@ -199,9 +153,64 @@ type UpdateAuthorByIDParams struct {
 	P2 uint64  `json:"p2"`
 }
 
-func (q *Queries) UpdateAuthorByID(ctx context.Context, arg UpdateAuthorByIDParams) (Author, error) {
-	row := q.db.QueryRowContext(ctx, updateAuthorByID, arg.P0, arg.P1, arg.P2)
+func (q *Queries) UpdateAuthorByID(ctx context.Context, db DBTX, arg UpdateAuthorByIDParams, opts ...query.ExecuteOption) (Author, error) {
+	row, err := db.QueryRow(ctx, updateAuthorByID,
+		append(opts, query.WithParameters(ydb.ParamsFromMap(map[string]any{
+			"$p0": arg.P0,
+			"$p1": arg.P1,
+			"$p2": arg.P2,
+		})))...,
+	)
 	var i Author
-	err := row.Scan(&i.ID, &i.Name, &i.Bio)
-	return i, err
+	if err != nil {
+		return i, xerrors.WithStackTrace(err)
+	}
+	err = row.Scan(&i.ID, &i.Name, &i.Bio)
+	if err != nil {
+		return i, xerrors.WithStackTrace(err)
+	}
+	return i, nil
+}
+
+const upsertAuthor = `-- name: UpsertAuthor :queryrows
+UPSERT INTO authors (id, name, bio) VALUES ($p0, $p1, $p2) RETURNING id, name, bio
+`
+
+type UpsertAuthorParams struct {
+	P0 uint64  `json:"p0"`
+	P1 string  `json:"p1"`
+	P2 *string `json:"p2"`
+}
+
+func (q *Queries) UpsertAuthor(ctx context.Context, db DBTX, arg UpsertAuthorParams, opts ...query.ExecuteOption) ([]Author, error) {
+	result, err := db.Query(ctx, upsertAuthor,
+		append(opts, query.WithParameters(ydb.ParamsFromMap(map[string]any{
+			"$p0": arg.P0,
+			"$p1": arg.P1,
+			"$p2": arg.P2,
+		})))...,
+	)
+	if err != nil {
+		return nil, xerrors.WithStackTrace(err)
+	}
+	var items []Author
+	for set, err := range result.ResultSets(ctx) {
+		if err != nil {
+			return nil, xerrors.WithStackTrace(err)
+		}
+		for row, err := range set.Rows(ctx) {
+			if err != nil {
+				return nil, xerrors.WithStackTrace(err)
+			}
+			var i Author
+			if err := row.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
+				return nil, xerrors.WithStackTrace(err)
+			}
+			items = append(items, i)
+		}
+	}
+	if err := result.Close(ctx); err != nil {
+		return nil, xerrors.WithStackTrace(err)
+	}
+	return items, nil
 }

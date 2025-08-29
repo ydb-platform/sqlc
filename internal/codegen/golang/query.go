@@ -39,6 +39,10 @@ func (v QueryValue) isEmpty() bool {
 	return v.Typ == "" && v.Name == "" && v.Struct == nil
 }
 
+func (v QueryValue) IsEmpty() bool {
+	return v.isEmpty()
+}
+
 type Argument struct {
 	Name string
 	Type string
@@ -254,6 +258,45 @@ func (v QueryValue) VariableForField(f Field) string {
 	return v.Name + "." + f.Name
 }
 
+func addDollarPrefix(name string) string {
+	if name == "" {
+		return name
+	}
+	if strings.HasPrefix(name, "$") {
+		return name
+	}
+	return "$" + name
+}
+
+// YDBParamMapEntries returns entries for a map[string]any literal for YDB parameters.
+func (v QueryValue) YDBParamMapEntries() string {
+	if v.isEmpty() {
+		return ""
+	}
+	var parts []string
+	if v.Struct == nil {
+		if v.Column != nil && v.Column.IsNamedParam {
+			name := v.Column.GetName()
+			if name != "" {
+				key := fmt.Sprintf("%q", addDollarPrefix(name))
+				parts = append(parts, key+": "+escape(v.Name))
+			}
+		}
+	} else {
+		for _, f := range v.Struct.Fields {
+			if f.Column != nil && f.Column.IsNamedParam {
+				name := f.Column.GetName()
+				if name != "" {
+					key := fmt.Sprintf("%q", addDollarPrefix(name))
+					parts = append(parts, key+": "+escape(v.VariableForField(f)))
+				}
+			}
+		}
+	}
+	parts = append(parts, "")
+	return "\n" + strings.Join(parts, ",\n")
+}
+
 // A struct used to generate methods and fields on the Queries struct
 type Query struct {
 	Cmd          string
@@ -271,7 +314,8 @@ type Query struct {
 
 func (q Query) hasRetType() bool {
 	scanned := q.Cmd == metadata.CmdOne || q.Cmd == metadata.CmdMany ||
-		q.Cmd == metadata.CmdBatchMany || q.Cmd == metadata.CmdBatchOne
+		q.Cmd == metadata.CmdBatchMany || q.Cmd == metadata.CmdBatchOne ||
+		q.Cmd == metadata.CmdQueryRows
 	return scanned && !q.Ret.isEmpty()
 }
 
