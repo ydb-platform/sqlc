@@ -21,14 +21,22 @@ func init() {
 }
 
 func YDB(t *testing.T, migrations []string) *ydb.Driver {
-	return link_YDB(t, migrations, true)
+	return link_YDB(t, migrations, true, false)
+}
+
+func YDBTLS(t *testing.T, migrations []string) *ydb.Driver {
+	return link_YDB(t, migrations, true, true)
 }
 
 func ReadOnlyYDB(t *testing.T, migrations []string) *ydb.Driver {
-	return link_YDB(t, migrations, false)
+	return link_YDB(t, migrations, false, false)
 }
 
-func link_YDB(t *testing.T, migrations []string, rw bool) *ydb.Driver {
+func ReadOnlyYDBTLS(t *testing.T, migrations []string) *ydb.Driver {
+	return link_YDB(t, migrations, false, true)
+}
+
+func link_YDB(t *testing.T, migrations []string, rw bool, tls bool) *ydb.Driver {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -65,8 +73,12 @@ func link_YDB(t *testing.T, migrations []string, rw bool) *ydb.Driver {
 	} else {
 		name = fmt.Sprintf("sqlc_test_%x", h.Sum(nil))
 	}
-
-	connectionString := fmt.Sprintf("grpc://%s%s", dbuiri, baseDB)
+	var connectionString string
+	if tls {
+		connectionString = fmt.Sprintf("grpcs://%s%s", dbuiri, baseDB)
+	} else {
+		connectionString = fmt.Sprintf("grpc://%s%s", dbuiri, baseDB)
+	}
 	t.Logf("→ Opening YDB connection: %s", connectionString)
 
 	db, err := ydb.Open(ctx, connectionString,
