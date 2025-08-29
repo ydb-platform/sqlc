@@ -16,10 +16,10 @@ WHERE bio IS NULL;
 -- name: Count :one
 SELECT COUNT(*) FROM authors;
 
--- name: COALESCE :many
+-- name: Coalesce :many
 SELECT id, name, COALESCE(bio, 'Null value!') FROM authors;
 
--- name: CreateOrUpdateAuthor :execresult 
+-- name: CreateOrUpdateAuthor :exec 
 UPSERT INTO authors (id, name, bio) VALUES ($p0, $p1, $p2);
 
 -- name: CreateOrUpdateAuthorReturningBio :one
@@ -28,5 +28,5 @@ UPSERT INTO authors (id, name, bio) VALUES ($p0, $p1, $p2) RETURNING bio;
 -- name: DeleteAuthor :exec 
 DELETE FROM authors WHERE id = $p0;
 
--- name: UpdateAuthorByID :one
+-- name: UpdateAuthorByID :queryrows
 UPDATE authors SET name = $p0, bio = $p1 WHERE id = $p2 RETURNING *;
