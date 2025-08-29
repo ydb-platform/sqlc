@@ -198,7 +198,7 @@ func (q *Queries) {{.MethodName}}(ctx context.Context, {{if $.EmitMethodsWithDBA
                 return nil, xerrors.WithStackTrace(err)
                 {{- end }}
             }
-			items = append(items, i)
+			items = append(items, {{.Ret.ReturnName}})
 		}
 	}
 	if err := result.Close(ctx); err != nil {
