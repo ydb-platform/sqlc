@@ -3,7 +3,6 @@ package local
 import (
 	"context"
 	"fmt"
-	"hash/fnv"
 	"math/rand"
 	"os"
 	"testing"
@@ -13,7 +12,6 @@ import (
 	"github.com/sqlc-dev/sqlc/internal/sql/sqlpath"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/query"
-	"github.com/ydb-platform/ydb-go-sdk/v3/sugar"
 )
 
 func init() {
@@ -37,10 +35,10 @@ func ReadOnlyYDBTLS(t *testing.T, migrations []string) *ydb.Driver {
 }
 
 func link_YDB(t *testing.T, migrations []string, rw bool, tls bool) *ydb.Driver {
-	t.Helper()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
+	t.Helper()
 
 	dbuiri := os.Getenv("YDB_SERVER_URI")
 	if dbuiri == "" {
@@ -52,34 +50,12 @@ func link_YDB(t *testing.T, migrations []string, rw bool, tls bool) *ydb.Driver 
 		baseDB = "/local"
 	}
 
-	var seed []string
-	files, err := sqlpath.Glob(migrations)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := fnv.New64()
-	for _, f := range files {
-		blob, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		h.Write(blob)
-		seed = append(seed, migrate.RemoveRollbackStatements(string(blob)))
-	}
-
-	var name string
-	if rw {
-		name = fmt.Sprintf("sqlc_test_%s", "test_new")
-	} else {
-		name = fmt.Sprintf("sqlc_test_%x", h.Sum(nil))
-	}
 	var connectionString string
 	if tls {
 		connectionString = fmt.Sprintf("grpcs://%s%s", dbuiri, baseDB)
 	} else {
 		connectionString = fmt.Sprintf("grpc://%s%s", dbuiri, baseDB)
 	}
-	t.Logf("→ Opening YDB connection: %s", connectionString)
 
 	db, err := ydb.Open(ctx, connectionString,
 		ydb.WithInsecure(),
@@ -89,20 +65,19 @@ func link_YDB(t *testing.T, migrations []string, rw bool, tls bool) *ydb.Driver 
 		t.Fatalf("failed to open YDB connection: %s", err)
 	}
 
-	prefix := fmt.Sprintf("%s/%s", baseDB, name)
-	t.Logf("→ Using prefix: %s", prefix)
-
-	err = sugar.RemoveRecursive(ctx, db, prefix)
+	files, err := sqlpath.Glob(migrations)
 	if err != nil {
-		t.Logf("Warning: failed to remove old data: %s", err)
+		t.Fatal(err)
 	}
 
-	t.Log("→ Applying migrations to prefix: ", prefix)
+	for _, f := range files {
+		blob, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stmt := migrate.RemoveRollbackStatements(string(blob))
 
-	for _, stmt := range seed {
-		err := db.Query().Exec(ctx, stmt,
-			query.WithTxControl(query.EmptyTxControl()),
-		)
+		err = db.Query().Exec(ctx, stmt, query.WithTxControl(query.EmptyTxControl()))
 		if err != nil {
 			t.Fatalf("failed to apply migration: %s\nSQL: %s", err, stmt)
 		}

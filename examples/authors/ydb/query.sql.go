@@ -128,6 +128,18 @@ func (q *Queries) DeleteAuthor(ctx context.Context, p0 uint64, opts ...query.Exe
 	return nil
 }
 
+const dropTable = `-- name: DropTable :exec
+DROP TABLE IF EXISTS authors
+`
+
+func (q *Queries) DropTable(ctx context.Context, opts ...query.ExecuteOption) error {
+	err := q.db.Exec(ctx, dropTable, opts...)
+	if err != nil {
+		return xerrors.WithStackTrace(err)
+	}
+	return nil
+}
+
 const getAuthor = `-- name: GetAuthor :one
 SELECT id, name, bio FROM authors
 WHERE id = $p0

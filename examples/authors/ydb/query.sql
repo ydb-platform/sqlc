@@ -30,3 +30,6 @@ DELETE FROM authors WHERE id = $p0;
 
 -- name: UpdateAuthorByID :queryrows
 UPDATE authors SET name = $p0, bio = $p1 WHERE id = $p2 RETURNING *;
+
+-- name: DropTable :exec
+DROP TABLE IF EXISTS authors;

@@ -169,4 +169,11 @@ func TestAuthors(t *testing.T) {
 			t.Fatalf("expected no authors, got %d", len(authors))
 		}
 	})
+	
+	t.Run("Drop Table Authors", func(t *testing.T) {
+		err := q.DropTable(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
 }
