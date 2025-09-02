@@ -61,100 +61,6 @@ func (q *Queries) {{.MethodName}}(ctx context.Context, {{if $.EmitMethodsWithDBA
 func (q *Queries) {{.MethodName}}(ctx context.Context, {{if $.EmitMethodsWithDBArgument}}db DBTX, {{end}}{{if not .Arg.IsEmpty}}{{.Arg.Pair}}, {{end}}opts ...query.ExecuteOption) ([]{{.Ret.DefineType}}, error) {
     {{- $dbArg := "q.db" }}{{- if $.EmitMethodsWithDBArgument }}{{- $dbArg = "db" }}{{- end -}}
     {{- if .Arg.IsEmpty }}
-    res, err := {{$dbArg}}.QueryResultSet(ctx, {{.ConstantName}}, opts...)
-    {{- else }}
-    res, err := {{$dbArg}}.QueryResultSet(ctx, {{.ConstantName}},
-        append(opts, query.WithParameters(ydb.ParamsFromMap(map[string]any{ {{.Arg.YDBParamMapEntries}} })))...,
-    )
-    {{- end }}
-    if err != nil {
-        {{- if $.WrapErrors}}
-        return nil, xerrors.WithStackTrace(fmt.Errorf("query {{.MethodName}}: %w", err))
-        {{- else }}
-        return nil, xerrors.WithStackTrace(err)
-        {{- end }}
-    }
-    {{- if $.EmitEmptySlices}}
-    items := []{{.Ret.DefineType}}{}
-    {{else}}
-    var items []{{.Ret.DefineType}}
-    {{end -}}
-    for row := range res.Rows(ctx) {
-        var {{.Ret.Name}} {{.Ret.Type}}
-        if err := row.Scan({{.Ret.Scan}}); err != nil {
-            {{- if $.WrapErrors}}
-            return nil, xerrors.WithStackTrace(fmt.Errorf("query {{.MethodName}}: %w", err))
-            {{- else }}
-            return nil, xerrors.WithStackTrace(err)
-            {{- end }}
-        }
-        items = append(items, {{.Ret.ReturnName}})
-    }
-    if err := res.Close(ctx); err != nil {
-        {{- if $.WrapErrors}}
-        return nil, xerrors.WithStackTrace(fmt.Errorf("query {{.MethodName}}: %w", err))
-        {{- else }}
-        return nil, xerrors.WithStackTrace(err)
-        {{- end }}
-    }
-    return items, nil
-}
-{{end}}
-
-{{if eq .Cmd ":exec"}}
-{{range .Comments}}//{{.}}
-{{end -}}
-func (q *Queries) {{.MethodName}}(ctx context.Context, {{if $.EmitMethodsWithDBArgument}}db DBTX, {{end}}{{if not .Arg.IsEmpty}}{{.Arg.Pair}}, {{end}}opts ...query.ExecuteOption) error {
-    {{- $dbArg := "q.db" }}{{- if $.EmitMethodsWithDBArgument }}{{- $dbArg = "db" }}{{- end -}}
-    {{- if .Arg.IsEmpty }}
-    err := {{$dbArg}}.Exec(ctx, {{.ConstantName}}, opts...)
-    {{- else }}
-    err := {{$dbArg}}.Exec(ctx, {{.ConstantName}},
-        append(opts, query.WithParameters(ydb.ParamsFromMap(map[string]any{ {{.Arg.YDBParamMapEntries}} })))...,
-    )
-    {{- end }}
-    if err != nil {
-        {{- if $.WrapErrors }}
-        return xerrors.WithStackTrace(fmt.Errorf("query {{.MethodName}}: %w", err))
-        {{- else }}
-        return xerrors.WithStackTrace(err)
-        {{- end }}
-    }
-    return nil
-}
-{{end}}
-
-{{if eq .Cmd ":execresult"}}
-{{range .Comments}}//{{.}}
-{{end -}}
-func (q *Queries) {{.MethodName}}(ctx context.Context, {{if $.EmitMethodsWithDBArgument}}db DBTX, {{end}}{{if not .Arg.IsEmpty}}{{.Arg.Pair}}, {{end}}opts ...query.ExecuteOption) (query.Result, error) {
-    {{- $dbArg := "q.db" }}{{- if $.EmitMethodsWithDBArgument }}{{- $dbArg = "db" }}{{- end -}}
-    {{- if .Arg.IsEmpty }}
-    result, err := {{$dbArg}}.Query(ctx, {{.ConstantName}}, opts...)
-    {{- else }}
-    result, err := {{$dbArg}}.Query(ctx, {{.ConstantName}},
-        append(opts, query.WithParameters(ydb.ParamsFromMap(map[string]any{ {{.Arg.YDBParamMapEntries}} })))...,
-    )
-    {{- end }}
-    {{- if $.WrapErrors}}
-    if err != nil {
-        return result, xerrors.WithStackTrace(fmt.Errorf("query {{.MethodName}}: %w", err))
-    }
-    {{- else }}
-    if err != nil {
-        return result, xerrors.WithStackTrace(err)
-    }
-    {{- end}}
-    return result, nil
-}
-{{end}}
-
-{{if eq .Cmd ":queryrows"}}
-{{range .Comments}}//{{.}}
-{{end -}}
-func (q *Queries) {{.MethodName}}(ctx context.Context, {{if $.EmitMethodsWithDBArgument}}db DBTX, {{end}}{{if not .Arg.IsEmpty}}{{.Arg.Pair}}, {{end}}opts ...query.ExecuteOption) ([]{{.Ret.DefineType}}, error) {
-    {{- $dbArg := "q.db" }}{{- if $.EmitMethodsWithDBArgument }}{{- $dbArg = "db" }}{{- end -}}
-    {{- if .Arg.IsEmpty }}
     result, err := {{$dbArg}}.Query(ctx, {{.ConstantName}}, opts...)
     {{- else }}
     result, err := {{$dbArg}}.Query(ctx, {{.ConstantName}},
@@ -208,6 +114,29 @@ func (q *Queries) {{.MethodName}}(ctx context.Context, {{if $.EmitMethodsWithDBA
         {{- end }}
 	}
 	return items, nil
+}
+{{end}}
+
+{{if eq .Cmd ":exec"}}
+{{range .Comments}}//{{.}}
+{{end -}}
+func (q *Queries) {{.MethodName}}(ctx context.Context, {{if $.EmitMethodsWithDBArgument}}db DBTX, {{end}}{{if not .Arg.IsEmpty}}{{.Arg.Pair}}, {{end}}opts ...query.ExecuteOption) error {
+    {{- $dbArg := "q.db" }}{{- if $.EmitMethodsWithDBArgument }}{{- $dbArg = "db" }}{{- end -}}
+    {{- if .Arg.IsEmpty }}
+    err := {{$dbArg}}.Exec(ctx, {{.ConstantName}}, opts...)
+    {{- else }}
+    err := {{$dbArg}}.Exec(ctx, {{.ConstantName}},
+        append(opts, query.WithParameters(ydb.ParamsFromMap(map[string]any{ {{.Arg.YDBParamMapEntries}} })))...,
+    )
+    {{- end }}
+    if err != nil {
+        {{- if $.WrapErrors }}
+        return xerrors.WithStackTrace(fmt.Errorf("query {{.MethodName}}: %w", err))
+        {{- else }}
+        return xerrors.WithStackTrace(err)
+        {{- end }}
+    }
+    return nil
 }
 {{end}}
 
