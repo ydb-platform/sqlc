@@ -2680,6 +2680,9 @@ func (c *cc) convert(node node) ast.Node {
 
 	case *parser.Alter_table_stmtContext:
 		return c.convertAlter_table_stmtContext(n)
+	
+	case *parser.Do_stmtContext:
+		return c.convertDo_stmtContext(n)
 
 	case *parser.Drop_table_stmtContext:
 		return c.convertDrop_table_stmtContext(n)
