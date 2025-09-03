@@ -541,6 +541,57 @@ func (c *cc) convertAlter_table_stmtContext(n *parser.Alter_table_stmtContext) a
 	return stmt
 }
 
+func (c *cc) convertDo_stmtContext(n *parser.Do_stmtContext) ast.Node {
+	if n.DO() == nil || (n.Call_action() == nil && n.Inline_action() == nil) {
+		return todo("convertDo_stmtContext", n)
+	}
+
+	switch {
+	case n.Call_action() != nil:
+		callAction := n.Call_action()
+		if callAction.LPAREN() != nil && callAction.RPAREN() != nil {
+			funcCall := &ast.FuncCall{
+				Funcname: &ast.List{},
+				Args:     &ast.List{},
+				AggOrder: &ast.List{},
+			}
+
+			if callAction.Bind_parameter() != nil {
+				funcCall.Funcname.Items = append(funcCall.Funcname.Items, c.convert(callAction.Bind_parameter()))
+			} else if callAction.EMPTY_ACTION() != nil {
+				funcCall.Funcname.Items = append(funcCall.Funcname.Items, &ast.String{Str: "EMPTY_ACTION"})
+			}
+
+			if callAction.Expr_list() != nil {
+				for _, expr := range callAction.Expr_list().AllExpr() {
+					funcCall.Args.Items = append(funcCall.Args.Items, c.convert(expr))
+				}
+			}
+
+			return &ast.DoStmt{
+				Args: &ast.List{Items: []ast.Node{funcCall}},
+			}
+		}
+
+	case n.Inline_action() != nil:
+		inlineAction := n.Inline_action()
+		if inlineAction.BEGIN() != nil && inlineAction.END() != nil && inlineAction.DO() != nil {
+			args := &ast.List{}
+			if defineBody := inlineAction.Define_action_or_subquery_body(); defineBody != nil {
+				cores := defineBody.AllSql_stmt_core()
+				for _, stmtCore := range cores {
+					if converted := c.convert(stmtCore); converted != nil {
+						args.Items = append(args.Items, converted)
+					}
+				}
+			}
+			return &ast.DoStmt{Args: args}
+		}
+	}
+
+	return todo("convertDo_stmtContext", n)
+}
+
 func (c *cc) convertDrop_table_stmtContext(n *parser.Drop_table_stmtContext) ast.Node {
 	if n.DROP() != nil && (n.TABLESTORE() != nil || (n.EXTERNAL() != nil && n.TABLE() != nil) || n.TABLE() != nil) {
 		name := parseTableName(n.Simple_table_ref().Simple_table_ref_core())
