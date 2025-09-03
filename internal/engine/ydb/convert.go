@@ -467,6 +467,80 @@ func (c *cc) convertRollback_stmtContext(n *parser.Rollback_stmtContext) ast.Nod
 	return todo("convertRollback_stmtContext", n)
 }
 
+func (c *cc) convertAlter_table_stmtContext(n *parser.Alter_table_stmtContext) ast.Node {
+	if n.ALTER() == nil || n.TABLE() == nil || n.Simple_table_ref() == nil || len(n.AllAlter_table_action()) == 0 {
+		return todo("convertAlter_table_stmtContext", n)
+	}
+
+	stmt := &ast.AlterTableStmt{
+		Table: parseTableName(n.Simple_table_ref().Simple_table_ref_core()),
+		Cmds:  &ast.List{},
+	}
+
+	for _, action := range n.AllAlter_table_action() {
+		if action == nil {
+			continue
+		}
+
+		switch {
+		case action.Alter_table_add_column() != nil:
+			ac := action.Alter_table_add_column()
+			if ac.ADD() != nil && ac.Column_schema() != nil {
+				columnDef := c.convertColumnSchema(ac.Column_schema().(*parser.Column_schemaContext))
+				stmt.Cmds.Items = append(stmt.Cmds.Items, &ast.AlterTableCmd{
+					Name:    &columnDef.Colname,
+					Subtype: ast.AT_AddColumn,
+					Def:     columnDef,
+				})
+			}
+		case action.Alter_table_drop_column() != nil:
+			ac := action.Alter_table_drop_column()
+			if ac.DROP() != nil && ac.An_id() != nil {
+				name := parseAnId(ac.An_id())
+				stmt.Cmds.Items = append(stmt.Cmds.Items, &ast.AlterTableCmd{
+					Name:    &name,
+					Subtype: ast.AT_DropColumn,
+				})
+			}
+		case action.Alter_table_alter_column_drop_not_null() != nil:
+			ac := action.Alter_table_alter_column_drop_not_null()
+			if ac.DROP() != nil && ac.NOT() != nil && ac.NULL() != nil && ac.An_id() != nil {
+				name := parseAnId(ac.An_id())
+				stmt.Cmds.Items = append(stmt.Cmds.Items, &ast.AlterTableCmd{
+					Name:    &name,
+					Subtype: ast.AT_DropNotNull,
+				})
+			}
+		case action.Alter_table_rename_to() != nil:
+			ac := action.Alter_table_rename_to()
+			if ac.RENAME() != nil && ac.TO() != nil && ac.An_id_table() != nil {
+				// TODO: Returning here may be incorrect if there are multiple specs
+				newName := parseAnIdTable(ac.An_id_table())
+				return &ast.RenameTableStmt{
+					Table:   stmt.Table,
+					NewName: &newName,
+				}
+			}
+		case action.Alter_table_add_index() != nil,
+			action.Alter_table_drop_index() != nil,
+			action.Alter_table_add_column_family() != nil,
+			action.Alter_table_alter_column_family() != nil,
+			action.Alter_table_set_table_setting_uncompat() != nil,
+			action.Alter_table_set_table_setting_compat() != nil,
+			action.Alter_table_reset_table_setting() != nil,
+			action.Alter_table_add_changefeed() != nil,
+			action.Alter_table_alter_changefeed() != nil,
+			action.Alter_table_drop_changefeed() != nil,
+			action.Alter_table_rename_index_to() != nil,
+			action.Alter_table_alter_index() != nil:
+			// All these actions do not change column schema relevant to sqlc; no-op.
+			// Intentionally ignored.
+		}
+	}
+
+	return stmt
+}
+
 func (c *cc) convertDrop_table_stmtContext(n *parser.Drop_table_stmtContext) ast.Node {
 	if n.DROP() != nil && (n.TABLESTORE() != nil || (n.EXTERNAL() != nil && n.TABLE() != nil) || n.TABLE() != nil) {
 		name := parseTableName(n.Simple_table_ref().Simple_table_ref_core())
@@ -2552,6 +2626,9 @@ func (c *cc) convert(node node) ast.Node {
 
 	case *parser.Update_stmtContext:
 		return c.convertUpdate_stmtContext(n)
+
+	case *parser.Alter_table_stmtContext:
+		return c.convertAlter_table_stmtContext(n)
 
 	case *parser.Drop_table_stmtContext:
 		return c.convertDrop_table_stmtContext(n)
