@@ -145,6 +145,7 @@ func TestDelete(t *testing.T) {
 							},
 						},
 						OnSelectStmt: &ast.SelectStmt{
+							DistinctClause: &ast.List{},
 							TargetList: &ast.List{
 								Items: []ast.Node{
 									&ast.ResTarget{
@@ -153,7 +154,12 @@ func TestDelete(t *testing.T) {
 									},
 								},
 							},
-							FromClause: &ast.List{},
+							FromClause:    &ast.List{},
+							GroupClause:    &ast.List{},
+							WindowClause:   &ast.List{},
+							ValuesLists:    &ast.List{},
+							SortClause:     &ast.List{},
+							LockingClause:  &ast.List{},
 						},
 						ReturningList: &ast.List{
 							Items: []ast.Node{
