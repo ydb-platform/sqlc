@@ -634,12 +634,9 @@ func (c *cc) convertDelete_stmtContext(n *parser.Delete_stmtContext) ast.Node {
 		if valSource != nil {
 			switch {
 			case valSource.Values_stmt() != nil:
-				source = &ast.SelectStmt{
-					ValuesLists: c.convert(valSource.Values_stmt()).(*ast.List),
-					FromClause:  &ast.List{},
-					TargetList:  &ast.List{},
-				}
-
+				stmt := emptySelectStmt()
+				stmt.ValuesLists = c.convert(valSource.Values_stmt()).(*ast.List)
+				source = stmt
 			case valSource.Select_stmt() != nil:
 				source = c.convert(valSource.Select_stmt())
 			}
@@ -829,12 +826,9 @@ func (c *cc) convertUpdate_stmtContext(n *parser.Update_stmtContext) ast.Node {
 		if valSource != nil {
 			switch {
 			case valSource.Values_stmt() != nil:
-				source = &ast.SelectStmt{
-					ValuesLists: c.convert(valSource.Values_stmt()).(*ast.List),
-					FromClause:  &ast.List{},
-					TargetList:  &ast.List{},
-				}
-
+				stmt := emptySelectStmt()
+				stmt.ValuesLists = c.convert(valSource.Values_stmt()).(*ast.List)
+				source = stmt
 			case valSource.Select_stmt() != nil:
 				source = c.convert(valSource.Select_stmt())
 			}
@@ -902,12 +896,9 @@ func (c *cc) convertInto_table_stmtContext(n *parser.Into_table_stmtContext) ast
 		if valSource != nil {
 			switch {
 			case valSource.Values_stmt() != nil:
-				source = &ast.SelectStmt{
-					ValuesLists: c.convert(valSource.Values_stmt()).(*ast.List),
-					FromClause:  &ast.List{},
-					TargetList:  &ast.List{},
-				}
-
+				stmt := emptySelectStmt()
+				stmt.ValuesLists = c.convert(valSource.Values_stmt()).(*ast.List)
+				source = stmt
 			case valSource.Select_stmt() != nil:
 				source = c.convert(valSource.Select_stmt())
 			}
@@ -1025,20 +1016,12 @@ func (c *cc) convertSelectStmtContext(n *parser.Select_stmtContext) ast.Node {
 			}
 			all = so.ALL() != nil
 		}
-		left = &ast.SelectStmt{
-			DistinctClause: &ast.List{},
-			TargetList:     &ast.List{},
-			FromClause:     &ast.List{},
-			GroupClause:    &ast.List{},
-			WindowClause:   &ast.List{},
-			ValuesLists:    &ast.List{},
-			SortClause:     &ast.List{},
-			LockingClause:  &ast.List{},
-			Op:             op,
-			All:            all,
-			Larg:           left,
-			Rarg:           right,
-		}
+		larg := left
+		left = emptySelectStmt()
+		left.Op = op
+		left.All = all
+		left.Larg = larg
+		left.Rarg = right
 	}
 
 	return left
@@ -1087,16 +1070,7 @@ func (c *cc) convertSelectKindParenthesis(n parser.ISelect_kind_parenthesisConte
 }
 
 func (c *cc) convertSelectCoreContext(n parser.ISelect_coreContext) ast.Node {
-	stmt := &ast.SelectStmt{
-		DistinctClause: &ast.List{},
-		TargetList:     &ast.List{},
-		FromClause:     &ast.List{},
-		GroupClause:    &ast.List{},
-		WindowClause:   &ast.List{},
-		ValuesLists:    &ast.List{},
-		SortClause:     &ast.List{},
-		LockingClause:  &ast.List{},
-	}
+	stmt := emptySelectStmt()
 	if n.Opt_set_quantifier() != nil {
 		oq := n.Opt_set_quantifier()
 		if oq.DISTINCT() != nil {

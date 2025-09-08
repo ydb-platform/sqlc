@@ -206,3 +206,16 @@ func byteOffsetFromRuneIndex(s string, runeIndex int) int {
 	}
 	return bytePos
 }
+
+func emptySelectStmt() *ast.SelectStmt {
+	return &ast.SelectStmt{
+		DistinctClause: &ast.List{},
+		TargetList:     &ast.List{},
+		FromClause:     &ast.List{},
+		GroupClause:    &ast.List{},
+		WindowClause:   &ast.List{},
+		ValuesLists:    &ast.List{},
+		SortClause:     &ast.List{},
+		LockingClause:  &ast.List{},
+	}
+}
