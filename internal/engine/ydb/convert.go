@@ -548,48 +548,62 @@ func (c *cc) convertDo_stmtContext(n *parser.Do_stmtContext) ast.Node {
 
 	switch {
 	case n.Call_action() != nil:
-		callAction := n.Call_action()
-		if callAction.LPAREN() != nil && callAction.RPAREN() != nil {
-			funcCall := &ast.FuncCall{
-				Funcname: &ast.List{},
-				Args:     &ast.List{},
-				AggOrder: &ast.List{},
-			}
-
-			if callAction.Bind_parameter() != nil {
-				funcCall.Funcname.Items = append(funcCall.Funcname.Items, c.convert(callAction.Bind_parameter()))
-			} else if callAction.EMPTY_ACTION() != nil {
-				funcCall.Funcname.Items = append(funcCall.Funcname.Items, &ast.String{Str: "EMPTY_ACTION"})
-			}
-
-			if callAction.Expr_list() != nil {
-				for _, expr := range callAction.Expr_list().AllExpr() {
-					funcCall.Args.Items = append(funcCall.Args.Items, c.convert(expr))
-				}
-			}
-
-			return &ast.DoStmt{
-				Args: &ast.List{Items: []ast.Node{funcCall}},
-			}
-		}
+		return c.convert(n.Call_action())
 
 	case n.Inline_action() != nil:
-		inlineAction := n.Inline_action()
-		if inlineAction.BEGIN() != nil && inlineAction.END() != nil && inlineAction.DO() != nil {
-			args := &ast.List{}
-			if defineBody := inlineAction.Define_action_or_subquery_body(); defineBody != nil {
-				cores := defineBody.AllSql_stmt_core()
-				for _, stmtCore := range cores {
-					if converted := c.convert(stmtCore); converted != nil {
-						args.Items = append(args.Items, converted)
-					}
-				}
-			}
-			return &ast.DoStmt{Args: args}
-		}
+		return c.convert(n.Inline_action())
 	}
 
 	return todo("convertDo_stmtContext", n)
+}
+
+func (c *cc) convertCall_actionContext(n *parser.Call_actionContext) ast.Node {
+	if n == nil {
+		return nil
+	}
+	if n.LPAREN() != nil && n.RPAREN() != nil {
+		funcCall := &ast.FuncCall{
+			Funcname: &ast.List{},
+			Args:     &ast.List{},
+			AggOrder: &ast.List{},
+		}
+
+		if n.Bind_parameter() != nil {
+			funcCall.Funcname.Items = append(funcCall.Funcname.Items, c.convert(n.Bind_parameter()))
+		} else if n.EMPTY_ACTION() != nil {
+			funcCall.Funcname.Items = append(funcCall.Funcname.Items, &ast.String{Str: "EMPTY_ACTION"})
+		}
+
+		if n.Expr_list() != nil {
+			for _, expr := range n.Expr_list().AllExpr() {
+				funcCall.Args.Items = append(funcCall.Args.Items, c.convert(expr))
+			}
+		}
+
+		return &ast.DoStmt{
+			Args: &ast.List{Items: []ast.Node{funcCall}},
+		}
+	}
+	return todo("convertCall_actionContext", n)
+}
+
+func (c *cc) convertInline_actionContext(n *parser.Inline_actionContext) ast.Node {
+	if n == nil {
+		return nil
+	}
+	if n.BEGIN() != nil && n.END() != nil && n.DO() != nil {
+		args := &ast.List{}
+		if defineBody := n.Define_action_or_subquery_body(); defineBody != nil {
+			cores := defineBody.AllSql_stmt_core()
+			for _, stmtCore := range cores {
+				if converted := c.convert(stmtCore); converted != nil {
+					args.Items = append(args.Items, converted)
+				}
+			}
+		}
+		return &ast.DoStmt{Args: args}
+	}
+	return todo("convertInline_actionContext", n)
 }
 
 func (c *cc) convertDrop_table_stmtContext(n *parser.Drop_table_stmtContext) ast.Node {
@@ -2921,6 +2935,12 @@ func (c *cc) convert(node node) ast.Node {
 
 	case *parser.Named_exprContext:
 		return c.convertNamed_exprContext(n)
+
+	case *parser.Call_actionContext:
+		return c.convertCall_actionContext(n)
+
+	case *parser.Inline_actionContext:
+		return c.convertInline_actionContext(n)
 
 	default:
 		return todo("convert(case=default)", n)
