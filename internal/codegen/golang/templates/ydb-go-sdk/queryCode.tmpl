@@ -63,7 +63,7 @@ func (q *Queries) {{.MethodName}}(ctx context.Context, {{if $.EmitMethodsWithDBA
     {{- if .Arg.IsEmpty }}
     result, err := {{$dbArg}}.QueryResultSet(ctx, {{.ConstantName}}, opts...)
     {{- else }}
-    result, err := {{$dbArg}}.Query(ctx, {{.ConstantName}}, 
+    result, err := {{$dbArg}}.QueryResultSet(ctx, {{.ConstantName}}, 
         append(opts, {{.Arg.YDBParamsBuilder}})...,
     )
     {{- end }}
@@ -82,7 +82,7 @@ func (q *Queries) {{.MethodName}}(ctx context.Context, {{if $.EmitMethodsWithDBA
 	for row, err := range result.Rows(ctx) {
 		if err != nil {
 			{{- if $.WrapErrors}}
-            return nil, xerrors.WithStackTrace(fmt.Errof("query {{.MethodName}}: %w", err))
+            return nil, xerrors.WithStackTrace(fmt.Errorf("query {{.MethodName}}: %w", err))
             {{- else }}
             return nil, xerrors.WithStackTrace(err)
             {{- end }}
