@@ -348,7 +348,6 @@ func ydbBuilderMethodForColumnType(dbType string) string {
 }
 
 // YDBParamsBuilder emits Go code that constructs YDB params using ParamsBuilder.
-// It handles nullable values using BeginOptional/EndOptional as requested.
 func (v QueryValue) YDBParamsBuilder() string {
 	if v.isEmpty() {
 		return ""
