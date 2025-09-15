@@ -144,7 +144,10 @@ func parseIntegerValue(text string) (int64, error) {
 }
 
 func (c *cc) extractRoleSpec(n parser.IRole_nameContext, roletype ast.RoleSpecType) (*ast.RoleSpec, bool, ast.Node) {
-	roleNode := c.convert(n)
+	roleNode, ok := n.Accept(c).(ast.Node)
+	if !ok {
+		return nil, false, nil
+	}
 
 	roleSpec := &ast.RoleSpec{
 		Roletype: roletype,

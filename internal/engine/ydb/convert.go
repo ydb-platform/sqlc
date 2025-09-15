@@ -12,6 +12,7 @@ import (
 )
 
 type cc struct {
+	parser.BaseYQLVisitor
 	paramCount int
 	content    string
 }
@@ -54,20 +55,20 @@ func NewIdentifier(t string) *ast.String {
 	return &ast.String{Str: identifier(t)}
 }
 
-func (c *cc) convertDrop_role_stmtCOntext(n *parser.Drop_role_stmtContext) ast.Node {
-	if n.DROP() == nil || (n.USER() == nil && n.GROUP() == nil) || len(n.AllRole_name()) == 0 {
-		return todo("Drop_role_stmtContext", n)
+func (c *cc) VisitDrop_role_stmt(ctx *parser.Drop_role_stmtContext) interface{} {
+	if ctx.DROP() == nil || (ctx.USER() == nil && ctx.GROUP() == nil) || len(ctx.AllRole_name()) == 0 {
+		return todo("Drop_role_stmtContext", ctx)
 	}
 
 	stmt := &ast.DropRoleStmt{
-		MissingOk: n.IF() != nil && n.EXISTS() != nil,
+		MissingOk: ctx.IF() != nil && ctx.EXISTS() != nil,
 		Roles:     &ast.List{},
 	}
 
-	for _, role := range n.AllRole_name() {
+	for _, role := range ctx.AllRole_name() {
 		member, isParam, _ := c.extractRoleSpec(role, ast.RoleSpecType(1))
 		if member == nil {
-			return todo("Drop_role_stmtContext", n)
+			return todo("Drop_role_stmtContext", ctx)
 		}
 
 		if debug.Active && isParam {
@@ -80,13 +81,13 @@ func (c *cc) convertDrop_role_stmtCOntext(n *parser.Drop_role_stmtContext) ast.N
 	return stmt
 }
 
-func (c *cc) convertAlter_group_stmtContext(n *parser.Alter_group_stmtContext) ast.Node {
-	if n.ALTER() == nil || n.GROUP() == nil || len(n.AllRole_name()) == 0 {
-		return todo("convertAlter_group_stmtContext", n)
+func (c *cc) VisitAlter_group_stmt(ctx *parser.Alter_group_stmtContext) interface{} {
+	if ctx.ALTER() == nil || ctx.GROUP() == nil || len(ctx.AllRole_name()) == 0 {
+		return todo("convertAlter_group_stmtContext", ctx)
 	}
-	role, paramFlag, _ := c.extractRoleSpec(n.Role_name(0), ast.RoleSpecType(1))
+	role, paramFlag, _ := c.extractRoleSpec(ctx.Role_name(0), ast.RoleSpecType(1))
 	if role == nil {
-		return todo("convertAlter_group_stmtContext", n)
+		return todo("convertAlter_group_stmtContext", ctx)
 	}
 
 	if debug.Active && paramFlag {
@@ -100,32 +101,36 @@ func (c *cc) convertAlter_group_stmtContext(n *parser.Alter_group_stmtContext) a
 	}
 
 	switch {
-	case n.RENAME() != nil && n.TO() != nil && len(n.AllRole_name()) > 1:
-		newName := c.convert(n.Role_name(1))
+	case ctx.RENAME() != nil && ctx.TO() != nil && len(ctx.AllRole_name()) > 1:
+		newName := ctx.Role_name(1).Accept(c)
 		action := "rename"
 
 		defElem := &ast.DefElem{
 			Defname:   &action,
 			Defaction: ast.DefElemAction(1),
-			Location:  c.pos(n.Role_name(1).GetStart()),
+			Location:  c.pos(ctx.Role_name(1).GetStart()),
 		}
 
 		bindFlag := true
-		switch v := newName.(type) {
-		case *ast.A_Const:
-			switch val := v.Val.(type) {
-			case *ast.String:
-				bindFlag = false
-				defElem.Arg = val
-			case *ast.Boolean:
-				defElem.Arg = val
+		if newNameNode, ok := newName.(ast.Node); ok {
+			switch v := newNameNode.(type) {
+			case *ast.A_Const:
+				switch val := v.Val.(type) {
+				case *ast.String:
+					bindFlag = false
+					defElem.Arg = val
+				case *ast.Boolean:
+					defElem.Arg = val
+				default:
+					return todo("convertAlter_group_stmtContext", ctx)
+				}
+			case *ast.ParamRef, *ast.A_Expr:
+				defElem.Arg = newNameNode
 			default:
-				return todo("convertAlter_group_stmtContext", n)
+				return todo("convertAlter_group_stmtContext", ctx)
 			}
-		case *ast.ParamRef, *ast.A_Expr:
-			defElem.Arg = newName
-		default:
-			return todo("convertAlter_group_stmtContext", n)
+		} else {
+			return todo("convertAlter_group_stmtContext", ctx)
 		}
 
 		if debug.Active && !paramFlag && bindFlag {
@@ -134,13 +139,13 @@ func (c *cc) convertAlter_group_stmtContext(n *parser.Alter_group_stmtContext) a
 
 		stmt.Options.Items = append(stmt.Options.Items, defElem)
 
-	case (n.ADD() != nil || n.DROP() != nil) && len(n.AllRole_name()) > 1:
+	case (ctx.ADD() != nil || ctx.DROP() != nil) && len(ctx.AllRole_name()) > 1:
 		defname := "rolemembers"
 		optionList := &ast.List{}
-		for _, role := range n.AllRole_name()[1:] {
+		for _, role := range ctx.AllRole_name()[1:] {
 			member, isParam, _ := c.extractRoleSpec(role, ast.RoleSpecType(1))
 			if member == nil {
-				return todo("convertAlter_group_stmtContext", n)
+				return todo("convertAlter_group_stmtContext", ctx)
 			}
 
 			if debug.Active && isParam && !paramFlag {
@@ -151,7 +156,7 @@ func (c *cc) convertAlter_group_stmtContext(n *parser.Alter_group_stmtContext) a
 		}
 
 		var action ast.DefElemAction
-		if n.ADD() != nil {
+		if ctx.ADD() != nil {
 			action = 3
 		} else {
 			action = 4
@@ -161,21 +166,21 @@ func (c *cc) convertAlter_group_stmtContext(n *parser.Alter_group_stmtContext) a
 			Defname:   &defname,
 			Arg:       optionList,
 			Defaction: action,
-			Location:  c.pos(n.GetStart()),
+			Location:  c.pos(ctx.GetStart()),
 		})
 	}
 
 	return stmt
 }
 
-func (c *cc) convertAlter_user_stmtContext(n *parser.Alter_user_stmtContext) ast.Node {
-	if n.ALTER() == nil || n.USER() == nil || len(n.AllRole_name()) == 0 {
-		return todo("Alter_user_stmtContext", n)
+func (c *cc) VisitAlter_user_stmt(ctx *parser.Alter_user_stmtContext) interface{} {
+	if ctx.ALTER() == nil || ctx.USER() == nil || len(ctx.AllRole_name()) == 0 {
+		return todo("Alter_user_stmtContext", ctx)
 	}
 
-	role, paramFlag, _ := c.extractRoleSpec(n.Role_name(0), ast.RoleSpecType(1))
+	role, paramFlag, _ := c.extractRoleSpec(ctx.Role_name(0), ast.RoleSpecType(1))
 	if role == nil {
-		return todo("convertAlter_group_stmtContext", n)
+		return todo("convertAlter_group_stmtContext", ctx)
 	}
 
 	if debug.Active && paramFlag {
@@ -189,32 +194,36 @@ func (c *cc) convertAlter_user_stmtContext(n *parser.Alter_user_stmtContext) ast
 	}
 
 	switch {
-	case n.RENAME() != nil && n.TO() != nil && len(n.AllRole_name()) > 1:
-		newName := c.convert(n.Role_name(1))
+	case ctx.RENAME() != nil && ctx.TO() != nil && len(ctx.AllRole_name()) > 1:
+		newName := ctx.Role_name(1).Accept(c)
 		action := "rename"
 
 		defElem := &ast.DefElem{
 			Defname:   &action,
 			Defaction: ast.DefElemAction(1),
-			Location:  c.pos(n.Role_name(1).GetStart()),
+			Location:  c.pos(ctx.Role_name(1).GetStart()),
 		}
 
 		bindFlag := true
-		switch v := newName.(type) {
-		case *ast.A_Const:
-			switch val := v.Val.(type) {
-			case *ast.String:
-				bindFlag = false
-				defElem.Arg = val
-			case *ast.Boolean:
-				defElem.Arg = val
+		if newNameNode, ok := newName.(ast.Node); ok {
+			switch v := newNameNode.(type) {
+			case *ast.A_Const:
+				switch val := v.Val.(type) {
+				case *ast.String:
+					bindFlag = false
+					defElem.Arg = val
+				case *ast.Boolean:
+					defElem.Arg = val
+				default:
+					return todo("Alter_user_stmtContext", ctx)
+				}
+			case *ast.ParamRef, *ast.A_Expr:
+				defElem.Arg = newNameNode
 			default:
-				return todo("Alter_user_stmtContext", n)
+				return todo("Alter_user_stmtContext", ctx)
 			}
-		case *ast.ParamRef, *ast.A_Expr:
-			defElem.Arg = newName
-		default:
-			return todo("Alter_user_stmtContext", n)
+		} else {
+			return todo("Alter_user_stmtContext", ctx)
 		}
 
 		if debug.Active && !paramFlag && bindFlag {
@@ -223,10 +232,12 @@ func (c *cc) convertAlter_user_stmtContext(n *parser.Alter_user_stmtContext) ast
 
 		stmt.Options.Items = append(stmt.Options.Items, defElem)
 
-	case len(n.AllUser_option()) > 0:
-		for _, opt := range n.AllUser_option() {
-			if node := c.convert(opt); node != nil {
-				stmt.Options.Items = append(stmt.Options.Items, node)
+	case len(ctx.AllUser_option()) > 0:
+		for _, opt := range ctx.AllUser_option() {
+			if result := opt.Accept(c); result != nil {
+				if node, ok := result.(ast.Node); ok {
+					stmt.Options.Items = append(stmt.Options.Items, node)
+				}
 			}
 		}
 	}
@@ -234,11 +245,11 @@ func (c *cc) convertAlter_user_stmtContext(n *parser.Alter_user_stmtContext) ast
 	return stmt
 }
 
-func (c *cc) convertCreate_group_stmtContext(n *parser.Create_group_stmtContext) ast.Node {
-	if n.CREATE() == nil || n.GROUP() == nil || len(n.AllRole_name()) == 0 {
-		return todo("Create_group_stmtContext", n)
+func (c *cc) VisitCreate_group_stmt(ctx *parser.Create_group_stmtContext) interface{} {
+	if ctx.CREATE() == nil || ctx.GROUP() == nil || len(ctx.AllRole_name()) == 0 {
+		return todo("Create_group_stmtContext", ctx)
 	}
-	groupName := c.convert(n.Role_name(0))
+	groupName := ctx.Role_name(0).Accept(c)
 
 	stmt := &ast.CreateRoleStmt{
 		StmtType: ast.RoleStmtType(3),
@@ -246,34 +257,38 @@ func (c *cc) convertCreate_group_stmtContext(n *parser.Create_group_stmtContext)
 	}
 
 	paramFlag := true
-	switch v := groupName.(type) {
-	case *ast.A_Const:
-		switch val := v.Val.(type) {
-		case *ast.String:
-			paramFlag = false
-			stmt.Role = &val.Str
-		case *ast.Boolean:
-			stmt.BindRole = groupName
+	if groupNameNode, ok := groupName.(ast.Node); ok {
+		switch v := groupNameNode.(type) {
+		case *ast.A_Const:
+			switch val := v.Val.(type) {
+			case *ast.String:
+				paramFlag = false
+				stmt.Role = &val.Str
+			case *ast.Boolean:
+				stmt.BindRole = groupNameNode
+			default:
+				return todo("convertCreate_group_stmtContext", ctx)
+			}
+		case *ast.ParamRef, *ast.A_Expr:
+			stmt.BindRole = groupNameNode
 		default:
-			return todo("convertCreate_group_stmtContext", n)
+			return todo("convertCreate_group_stmtContext", ctx)
 		}
-	case *ast.ParamRef, *ast.A_Expr:
-		stmt.BindRole = groupName
-	default:
-		return todo("convertCreate_group_stmtContext", n)
+	} else {
+		return todo("convertCreate_group_stmtContext", ctx)
 	}
 
 	if debug.Active && paramFlag {
 		log.Printf("YDB does not currently support parameters in the CREATE GROUP statement")
 	}
 
-	if n.WITH() != nil && n.USER() != nil && len(n.AllRole_name()) > 1 {
+	if ctx.WITH() != nil && ctx.USER() != nil && len(ctx.AllRole_name()) > 1 {
 		defname := "rolemembers"
 		optionList := &ast.List{}
-		for _, role := range n.AllRole_name()[1:] {
+		for _, role := range ctx.AllRole_name()[1:] {
 			member, isParam, _ := c.extractRoleSpec(role, ast.RoleSpecType(1))
 			if member == nil {
-				return todo("convertCreate_group_stmtContext", n)
+				return todo("convertCreate_group_stmtContext", ctx)
 			}
 
 			if debug.Active && isParam && !paramFlag {
@@ -286,31 +301,33 @@ func (c *cc) convertCreate_group_stmtContext(n *parser.Create_group_stmtContext)
 		stmt.Options.Items = append(stmt.Options.Items, &ast.DefElem{
 			Defname:  &defname,
 			Arg:      optionList,
-			Location: c.pos(n.GetStart()),
+			Location: c.pos(ctx.GetStart()),
 		})
 	}
 
 	return stmt
 }
 
-func (c *cc) convertUse_stmtContext(n *parser.Use_stmtContext) ast.Node {
-	if n.USE() != nil && n.Cluster_expr() != nil {
-		clusterExpr := c.convert(n.Cluster_expr())
-		stmt := &ast.UseStmt{
-			Xpr:      clusterExpr,
-			Location: c.pos(n.GetStart()),
+func (c *cc) VisitUse_stmt(ctx *parser.Use_stmtContext) interface{} {
+	if ctx.USE() != nil && ctx.Cluster_expr() != nil {
+		clusterExpr := ctx.Cluster_expr().Accept(c)
+		if clusterExprNode, ok := clusterExpr.(ast.Node); ok {
+			stmt := &ast.UseStmt{
+				Xpr:      clusterExprNode,
+				Location: c.pos(ctx.GetStart()),
+			}
+			return stmt
 		}
-		return stmt
 	}
-	return todo("convertUse_stmtContext", n)
+	return todo("convertUse_stmtContext", ctx)
 }
 
-func (c *cc) convertCluster_exprContext(n *parser.Cluster_exprContext) ast.Node {
+func (c *cc) VisitCluster_expr(ctx *parser.Cluster_exprContext) interface{} {
 	var node ast.Node
 
 	switch {
-	case n.Pure_column_or_named() != nil:
-		pureCtx := n.Pure_column_or_named()
+	case ctx.Pure_column_or_named() != nil:
+		pureCtx := ctx.Pure_column_or_named()
 		if anID := pureCtx.An_id(); anID != nil {
 			name := parseAnId(anID)
 			node = &ast.ColumnRef{
@@ -318,32 +335,36 @@ func (c *cc) convertCluster_exprContext(n *parser.Cluster_exprContext) ast.Node 
 				Location: c.pos(anID.GetStart()),
 			}
 		} else if bp := pureCtx.Bind_parameter(); bp != nil {
-			node = c.convert(bp)
+			if result := bp.Accept(c); result != nil {
+				if nodeResult, ok := result.(ast.Node); ok {
+					node = nodeResult
+				}
+			}
 		}
-	case n.ASTERISK() != nil:
+	case ctx.ASTERISK() != nil:
 		node = &ast.A_Star{}
 	default:
-		return todo("convertCluster_exprContext", n)
+		return todo("convertCluster_exprContext", ctx)
 	}
 
-	if n.An_id() != nil && n.COLON() != nil {
-		name := parseAnId(n.An_id())
+	if ctx.An_id() != nil && ctx.COLON() != nil {
+		name := parseAnId(ctx.An_id())
 		return &ast.A_Expr{
 			Name:     &ast.List{Items: []ast.Node{&ast.String{Str: ":"}}},
 			Lexpr:    &ast.String{Str: name},
 			Rexpr:    node,
-			Location: c.pos(n.GetStart()),
+			Location: c.pos(ctx.GetStart()),
 		}
 	}
 
 	return node
 }
 
-func (c *cc) convertCreate_user_stmtContext(n *parser.Create_user_stmtContext) ast.Node {
-	if n.CREATE() == nil || n.USER() == nil || n.Role_name() == nil {
-		return todo("convertCreate_user_stmtContext", n)
+func (c *cc) VisitCreate_user_stmt(ctx *parser.Create_user_stmtContext) interface{} {
+	if ctx.CREATE() == nil || ctx.USER() == nil || ctx.Role_name() == nil {
+		return todo("convertCreate_user_stmtContext", ctx)
 	}
-	roleNode := c.convert(n.Role_name())
+	roleNode := ctx.Role_name().Accept(c)
 
 	stmt := &ast.CreateRoleStmt{
 		StmtType: ast.RoleStmtType(2),
@@ -351,32 +372,38 @@ func (c *cc) convertCreate_user_stmtContext(n *parser.Create_user_stmtContext) a
 	}
 
 	paramFlag := true
-	switch v := roleNode.(type) {
-	case *ast.A_Const:
-		switch val := v.Val.(type) {
-		case *ast.String:
-			paramFlag = false
-			stmt.Role = &val.Str
-		case *ast.Boolean:
-			stmt.BindRole = roleNode
+	if roleNodeResult, ok := roleNode.(ast.Node); ok {
+		switch v := roleNodeResult.(type) {
+		case *ast.A_Const:
+			switch val := v.Val.(type) {
+			case *ast.String:
+				paramFlag = false
+				stmt.Role = &val.Str
+			case *ast.Boolean:
+				stmt.BindRole = roleNodeResult
+			default:
+				return todo("convertCreate_user_stmtContext", ctx)
+			}
+		case *ast.ParamRef, *ast.A_Expr:
+			stmt.BindRole = roleNodeResult
 		default:
-			return todo("convertCreate_user_stmtContext", n)
+			return todo("convertCreate_user_stmtContext", ctx)
 		}
-	case *ast.ParamRef, *ast.A_Expr:
-		stmt.BindRole = roleNode
-	default:
-		return todo("convertCreate_user_stmtContext", n)
+	} else {
+		return todo("convertCreate_user_stmtContext", ctx)
 	}
 
 	if debug.Active && paramFlag {
 		log.Printf("YDB does not currently support parameters in the CREATE USER statement")
 	}
 
-	if len(n.AllUser_option()) > 0 {
+	if len(ctx.AllUser_option()) > 0 {
 		options := []ast.Node{}
-		for _, opt := range n.AllUser_option() {
-			if node := c.convert(opt); node != nil {
-				options = append(options, node)
+		for _, opt := range ctx.AllUser_option() {
+			if result := opt.Accept(c); result != nil {
+				if node, ok := result.(ast.Node); ok {
+					options = append(options, node)
+				}
 			}
 		}
 		if len(options) > 0 {
@@ -386,10 +413,10 @@ func (c *cc) convertCreate_user_stmtContext(n *parser.Create_user_stmtContext) a
 	return stmt
 }
 
-func (c *cc) convertUser_optionContext(n *parser.User_optionContext) ast.Node {
+func (c *cc) VisitUser_option(ctx *parser.User_optionContext) interface{} {
 	switch {
-	case n.Authentication_option() != nil:
-		aOpt := n.Authentication_option()
+	case ctx.Authentication_option() != nil:
+		aOpt := ctx.Authentication_option()
 		if pOpt := aOpt.Password_option(); pOpt != nil {
 			if pOpt.PASSWORD() != nil {
 				name := "password"
@@ -422,8 +449,8 @@ func (c *cc) convertUser_optionContext(n *parser.User_optionContext) ast.Node {
 			}
 		}
 
-	case n.Login_option() != nil:
-		lOpt := n.Login_option()
+	case ctx.Login_option() != nil:
+		lOpt := ctx.Login_option()
 		var name string
 		if lOpt.LOGIN() != nil {
 			name = "login"
@@ -436,63 +463,70 @@ func (c *cc) convertUser_optionContext(n *parser.User_optionContext) ast.Node {
 			Location: c.pos(lOpt.GetStart()),
 		}
 	default:
-		return todo("convertUser_optionContext", n)
+		return todo("convertUser_optionContext", ctx)
 	}
 	return nil
 }
 
-func (c *cc) convertRole_nameContext(n *parser.Role_nameContext) ast.Node {
+func (c *cc) VisitRole_name(ctx *parser.Role_nameContext) interface{} {
 	switch {
-	case n.An_id_or_type() != nil:
-		name := parseAnIdOrType(n.An_id_or_type())
-		return &ast.A_Const{Val: NewIdentifier(name), Location: c.pos(n.GetStart())}
-	case n.Bind_parameter() != nil:
-		bindPar := c.convert(n.Bind_parameter())
-		return bindPar
+	case ctx.An_id_or_type() != nil:
+		name := parseAnIdOrType(ctx.An_id_or_type())
+		return &ast.A_Const{Val: NewIdentifier(name), Location: c.pos(ctx.GetStart())}
+	case ctx.Bind_parameter() != nil:
+		bindPar := ctx.Bind_parameter().Accept(c)
+		if bindParNode, ok := bindPar.(ast.Node); ok {
+			return bindParNode
+		}
+		return &ast.TODO{}
 	}
-	return todo("convertRole_nameContext", n)
+	return todo("convertRole_nameContext", ctx)
 }
 
-func (c *cc) convertCommit_stmtContext(n *parser.Commit_stmtContext) ast.Node {
-	if n.COMMIT() != nil {
+func (c *cc) VisitCommit_stmt(ctx *parser.Commit_stmtContext) interface{} {
+	if ctx.COMMIT() != nil {
 		return &ast.TransactionStmt{Kind: ast.TransactionStmtKind(3)}
 	}
-	return todo("convertCommit_stmtContext", n)
+	return todo("convertCommit_stmtContext", ctx)
 }
 
-func (c *cc) convertRollback_stmtContext(n *parser.Rollback_stmtContext) ast.Node {
-	if n.ROLLBACK() != nil {
+func (c *cc) VisitRollback_stmt(ctx *parser.Rollback_stmtContext) interface{} {
+	if ctx.ROLLBACK() != nil {
 		return &ast.TransactionStmt{Kind: ast.TransactionStmtKind(4)}
 	}
-	return todo("convertRollback_stmtContext", n)
+	return todo("convertRollback_stmtContext", ctx)
 }
 
-func (c *cc) convertDrop_table_stmtContext(n *parser.Drop_table_stmtContext) ast.Node {
-	if n.DROP() != nil && (n.TABLESTORE() != nil || (n.EXTERNAL() != nil && n.TABLE() != nil) || n.TABLE() != nil) {
-		name := parseTableName(n.Simple_table_ref().Simple_table_ref_core())
+func (c *cc) VisitDrop_table_stmt(ctx *parser.Drop_table_stmtContext) interface{} {
+	if ctx.DROP() != nil && (ctx.TABLESTORE() != nil || (ctx.EXTERNAL() != nil && ctx.TABLE() != nil) || ctx.TABLE() != nil) {
+		name := parseTableName(ctx.Simple_table_ref().Simple_table_ref_core())
 		stmt := &ast.DropTableStmt{
-			IfExists: n.IF() != nil && n.EXISTS() != nil,
+			IfExists: ctx.IF() != nil && ctx.EXISTS() != nil,
 			Tables:   []*ast.TableName{name},
 		}
 		return stmt
 	}
-	return todo("convertDrop_Table_stmtContxt", n)
+	return todo("convertDrop_Table_stmtContxt", ctx)
 }
 
-func (c *cc) convertDelete_stmtContext(n *parser.Delete_stmtContext) ast.Node {
-	batch := n.BATCH() != nil
+func (c *cc) VisitDelete_stmt(ctx *parser.Delete_stmtContext) interface{} {
+	batch := ctx.BATCH() != nil
 
-	tableName := identifier(n.Simple_table_ref().Simple_table_ref_core().GetText())
+	tableName := identifier(ctx.Simple_table_ref().Simple_table_ref_core().GetText())
 	rel := &ast.RangeVar{Relname: &tableName}
 
 	var where ast.Node
-	if n.WHERE() != nil && n.Expr() != nil {
-		where = c.convert(n.Expr())
+	if ctx.WHERE() != nil && ctx.Expr() != nil {
+		if whereResult := ctx.Expr().Accept(c); whereResult != nil {
+			if whereNode, ok := whereResult.(ast.Node); ok {
+				where = whereNode
+			}
+		}
 	}
 	var cols *ast.List
 	var source ast.Node
-	if n.ON() != nil && n.Into_values_source() != nil {
-		nVal := n.Into_values_source()
+	if ctx.ON() != nil && ctx.Into_values_source() != nil {
+		nVal := ctx.Into_values_source()
 		// todo: handle default values when implemented
 		if pureCols := nVal.Pure_column_list(); pureCols != nil {
 			cols = &ast.List{}
@@ -510,20 +544,35 @@ func (c *cc) convertDelete_stmtContext(n *parser.Delete_stmtContext) ast.Node {
 			switch {
 			case valSource.Values_stmt() != nil:
 				source = &ast.SelectStmt{
-					ValuesLists: c.convert(valSource.Values_stmt()).(*ast.List),
-					FromClause:  &ast.List{},
-					TargetList:  &ast.List{},
+					ValuesLists: func() *ast.List {
+						if valuesResult := valSource.Values_stmt().Accept(c); valuesResult != nil {
+							if valuesList, ok := valuesResult.(*ast.List); ok {
+								return valuesList
+							}
+						}
+						return &ast.List{}
+					}(),
+					FromClause: &ast.List{},
+					TargetList: &ast.List{},
 				}
 
 			case valSource.Select_stmt() != nil:
-				source = c.convert(valSource.Select_stmt())
+				if selectResult := valSource.Select_stmt().Accept(c); selectResult != nil {
+					if selectNode, ok := selectResult.(ast.Node); ok {
+						source = selectNode
+					}
+				}
 			}
 		}
 	}
 
 	returning := &ast.List{}
-	if ret := n.Returning_columns_list(); ret != nil {
-		returning = c.convert(ret).(*ast.List)
+	if ret := ctx.Returning_columns_list(); ret != nil {
+		if retResult := ret.Accept(c); retResult != nil {
+			if retList, ok := retResult.(*ast.List); ok {
+				returning = retList
+			}
+		}
 	}
 
 	stmts := &ast.DeleteStmt{
@@ -538,10 +587,10 @@ func (c *cc) convertDelete_stmtContext(n *parser.Delete_stmtContext) ast.Node {
 	return stmts
 }
 
-func (c *cc) convertPragma_stmtContext(n *parser.Pragma_stmtContext) ast.Node {
-	if n.PRAGMA() != nil && n.An_id() != nil {
+func (c *cc) VisitPragma_stmt(ctx *parser.Pragma_stmtContext) interface{} {
+	if ctx.PRAGMA() != nil && ctx.An_id() != nil {
 		prefix := ""
-		if p := n.Opt_id_prefix_or_type(); p != nil {
+		if p := ctx.Opt_id_prefix_or_type(); p != nil {
 			prefix = parseAnIdOrType(p.An_id_or_type())
 		}
 		items := []ast.Node{}
@@ -549,37 +598,45 @@ func (c *cc) convertPragma_stmtContext(n *parser.Pragma_stmtContext) ast.Node {
 			items = append(items, &ast.A_Const{Val: NewIdentifier(prefix)})
 		}
 
-		name := parseAnId(n.An_id())
+		name := parseAnId(ctx.An_id())
 		items = append(items, &ast.A_Const{Val: NewIdentifier(name)})
 
 		stmt := &ast.Pragma_stmt{
 			Name:     &ast.List{Items: items},
-			Location: c.pos(n.An_id().GetStart()),
+			Location: c.pos(ctx.An_id().GetStart()),
 		}
 
-		if n.EQUALS() != nil {
+		if ctx.EQUALS() != nil {
 			stmt.Equals = true
-			if val := n.Pragma_value(0); val != nil {
-				stmt.Values = &ast.List{Items: []ast.Node{c.convert(val)}}
+			if val := ctx.Pragma_value(0); val != nil {
+				if valResult := val.Accept(c); valResult != nil {
+					if valNode, ok := valResult.(ast.Node); ok {
+						stmt.Values = &ast.List{Items: []ast.Node{valNode}}
+					}
+				}
 			}
-		} else if lp := n.LPAREN(); lp != nil {
+		} else if lp := ctx.LPAREN(); lp != nil {
 			values := []ast.Node{}
-			for _, v := range n.AllPragma_value() {
-				values = append(values, c.convert(v))
+			for _, v := range ctx.AllPragma_value() {
+				if vResult := v.Accept(c); vResult != nil {
+					if vNode, ok := vResult.(ast.Node); ok {
+						values = append(values, vNode)
+					}
+				}
 			}
 			stmt.Values = &ast.List{Items: values}
 		}
 
 		return stmt
 	}
-	return todo("convertPragma_stmtContext", n)
+	return todo("convertPragma_stmtContext", ctx)
 }
 
-func (c *cc) convertPragma_valueContext(n *parser.Pragma_valueContext) ast.Node {
+func (c *cc) VisitPragma_value(ctx *parser.Pragma_valueContext) interface{} {
 	switch {
-	case n.Signed_number() != nil:
-		if n.Signed_number().Integer() != nil {
-			text := n.Signed_number().GetText()
+	case ctx.Signed_number() != nil:
+		if ctx.Signed_number().Integer() != nil {
+			text := ctx.Signed_number().GetText()
 			val, err := parseIntegerValue(text)
 			if err != nil {
 				if debug.Active {
@@ -587,39 +644,42 @@ func (c *cc) convertPragma_valueContext(n *parser.Pragma_valueContext) ast.Node 
 				}
 				return &ast.TODO{}
 			}
-			return &ast.A_Const{Val: &ast.Integer{Ival: val}, Location: c.pos(n.GetStart())}
+			return &ast.A_Const{Val: &ast.Integer{Ival: val}, Location: c.pos(ctx.GetStart())}
 		}
-		if n.Signed_number().Real_() != nil {
-			text := n.Signed_number().GetText()
-			return &ast.A_Const{Val: &ast.Float{Str: text}, Location: c.pos(n.GetStart())}
+		if ctx.Signed_number().Real_() != nil {
+			text := ctx.Signed_number().GetText()
+			return &ast.A_Const{Val: &ast.Float{Str: text}, Location: c.pos(ctx.GetStart())}
 		}
-	case n.STRING_VALUE() != nil:
-		val := n.STRING_VALUE().GetText()
+	case ctx.STRING_VALUE() != nil:
+		val := ctx.STRING_VALUE().GetText()
 		if len(val) >= 2 {
 			val = val[1 : len(val)-1]
 		}
-		return &ast.A_Const{Val: &ast.String{Str: val}, Location: c.pos(n.GetStart())}
-	case n.Bool_value() != nil:
+		return &ast.A_Const{Val: &ast.String{Str: val}, Location: c.pos(ctx.GetStart())}
+	case ctx.Bool_value() != nil:
 		var i bool
-		if n.Bool_value().TRUE() != nil {
+		if ctx.Bool_value().TRUE() != nil {
 			i = true
 		}
-		return &ast.A_Const{Val: &ast.Boolean{Boolval: i}, Location: c.pos(n.GetStart())}
-	case n.Bind_parameter() != nil:
-		bindPar := c.convert(n.Bind_parameter())
-		return bindPar
+		return &ast.A_Const{Val: &ast.Boolean{Boolval: i}, Location: c.pos(ctx.GetStart())}
+	case ctx.Bind_parameter() != nil:
+		bindPar := ctx.Bind_parameter().Accept(c)
+		if bindParNode, ok := bindPar.(ast.Node); ok {
+			return bindParNode
+		}
+		return &ast.TODO{}
 	}
 
-	return todo("convertPragma_valueContext", n)
+	return todo("convertPragma_valueContext", ctx)
 }
 
-func (c *cc) convertUpdate_stmtContext(n *parser.Update_stmtContext) ast.Node {
-	if n.UPDATE() == nil {
+func (c *cc) VisitUpdate_stmt(ctx *parser.Update_stmtContext) interface{} {
+	if ctx.UPDATE() == nil {
 		return nil
 	}
-	batch := n.BATCH() != nil
+	batch := ctx.BATCH() != nil
 
-	tableName := identifier(n.Simple_table_ref().Simple_table_ref_core().GetText())
+	tableName := identifier(ctx.Simple_table_ref().Simple_table_ref_core().GetText())
 	rel := &ast.RangeVar{Relname: &tableName}
 
 	var where ast.Node
@@ -627,8 +687,8 @@ func (c *cc) convertUpdate_stmtContext(n *parser.Update_stmtContext) ast.Node {
 	var cols *ast.List
 	var source ast.Node
 
-	if n.SET() != nil && n.Set_clause_choice() != nil {
-		nSet := n.Set_clause_choice()
+	if ctx.SET() != nil && ctx.Set_clause_choice() != nil {
+		nSet := ctx.Set_clause_choice()
 		setList = &ast.List{Items: []ast.Node{}}
 
 		switch {
@@ -636,13 +696,16 @@ func (c *cc) convertUpdate_stmtContext(n *parser.Update_stmtContext) ast.Node {
 			for _, clause := range nSet.Set_clause_list().AllSet_clause() {
 				targetCtx := clause.Set_target()
 				columnName := identifier(targetCtx.Column_name().GetText())
-				expr := c.convert(clause.Expr())
-				resTarget := &ast.ResTarget{
-					Name:     &columnName,
-					Val:      expr,
-					Location: c.pos(clause.Expr().GetStart()),
+				if exprResult := clause.Expr().Accept(c); exprResult != nil {
+					if exprNode, ok := exprResult.(ast.Node); ok {
+						resTarget := &ast.ResTarget{
+							Name:     &columnName,
+							Val:      exprNode,
+							Location: c.pos(clause.Expr().GetStart()),
+						}
+						setList.Items = append(setList.Items, resTarget)
+					}
 				}
-				setList.Items = append(setList.Items, resTarget)
 			}
 
 		case nSet.Multiple_column_assignment() != nil:
@@ -662,7 +725,11 @@ func (c *cc) convertUpdate_stmtContext(n *parser.Update_stmtContext) ast.Node {
 					Args: &ast.List{},
 				}
 				for _, expr := range exprList.AllExpr() {
-					rowExpr.Args.Items = append(rowExpr.Args.Items, c.convert(expr))
+					if exprResult := expr.Accept(c); exprResult != nil {
+						if exprNode, ok := exprResult.(ast.Node); ok {
+							rowExpr.Args.Items = append(rowExpr.Args.Items, exprNode)
+						}
+					}
 				}
 			}
 
@@ -680,14 +747,18 @@ func (c *cc) convertUpdate_stmtContext(n *parser.Update_stmtContext) ast.Node {
 			}
 		}
 
-		if n.WHERE() != nil && n.Expr() != nil {
-			where = c.convert(n.Expr())
+		if ctx.WHERE() != nil && ctx.Expr() != nil {
+			if whereResult := ctx.Expr().Accept(c); whereResult != nil {
+				if whereNode, ok := whereResult.(ast.Node); ok {
+					where = whereNode
+				}
+			}
 		}
-	} else if n.ON() != nil && n.Into_values_source() != nil {
+	} else if ctx.ON() != nil && ctx.Into_values_source() != nil {
 
 		// todo: handle default values when implemented
 
-		nVal := n.Into_values_source()
+		nVal := ctx.Into_values_source()
 
 		if pureCols := nVal.Pure_column_list(); pureCols != nil {
 			cols = &ast.List{}
@@ -705,20 +776,35 @@ func (c *cc) convertUpdate_stmtContext(n *parser.Update_stmtContext) ast.Node {
 			switch {
 			case valSource.Values_stmt() != nil:
 				source = &ast.SelectStmt{
-					ValuesLists: c.convert(valSource.Values_stmt()).(*ast.List),
-					FromClause:  &ast.List{},
-					TargetList:  &ast.List{},
+					ValuesLists: func() *ast.List {
+						if valuesResult := valSource.Values_stmt().Accept(c); valuesResult != nil {
+							if valuesList, ok := valuesResult.(*ast.List); ok {
+								return valuesList
+							}
+						}
+						return &ast.List{}
+					}(),
+					FromClause: &ast.List{},
+					TargetList: &ast.List{},
 				}
 
 			case valSource.Select_stmt() != nil:
-				source = c.convert(valSource.Select_stmt())
+				if selectResult := valSource.Select_stmt().Accept(c); selectResult != nil {
+					if selectNode, ok := selectResult.(ast.Node); ok {
+						source = selectNode
+					}
+				}
 			}
 		}
 	}
 
 	returning := &ast.List{}
-	if ret := n.Returning_columns_list(); ret != nil {
-		returning = c.convert(ret).(*ast.List)
+	if ret := ctx.Returning_columns_list(); ret != nil {
+		if retResult := ret.Accept(c); retResult != nil {
+			if retList, ok := retResult.(*ast.List); ok {
+				returning = retList
+			}
+		}
 	}
 
 	stmts := &ast.UpdateStmt{
@@ -736,30 +822,30 @@ func (c *cc) convertUpdate_stmtContext(n *parser.Update_stmtContext) ast.Node {
 	return stmts
 }
 
-func (c *cc) convertInto_table_stmtContext(n *parser.Into_table_stmtContext) ast.Node {
-	tableName := identifier(n.Into_simple_table_ref().Simple_table_ref().Simple_table_ref_core().GetText())
+func (c *cc) VisitInto_table_stmt(ctx *parser.Into_table_stmtContext) interface{} {
+	tableName := identifier(ctx.Into_simple_table_ref().Simple_table_ref().Simple_table_ref_core().GetText())
 	rel := &ast.RangeVar{
 		Relname:  &tableName,
-		Location: c.pos(n.Into_simple_table_ref().GetStart()),
+		Location: c.pos(ctx.Into_simple_table_ref().GetStart()),
 	}
 
 	onConflict := &ast.OnConflictClause{}
 	switch {
-	case n.INSERT() != nil && n.OR() != nil && n.ABORT() != nil:
+	case ctx.INSERT() != nil && ctx.OR() != nil && ctx.ABORT() != nil:
 		onConflict.Action = ast.OnConflictAction_INSERT_OR_ABORT
-	case n.INSERT() != nil && n.OR() != nil && n.REVERT() != nil:
+	case ctx.INSERT() != nil && ctx.OR() != nil && ctx.REVERT() != nil:
 		onConflict.Action = ast.OnConflictAction_INSERT_OR_REVERT
-	case n.INSERT() != nil && n.OR() != nil && n.IGNORE() != nil:
+	case ctx.INSERT() != nil && ctx.OR() != nil && ctx.IGNORE() != nil:
 		onConflict.Action = ast.OnConflictAction_INSERT_OR_IGNORE
-	case n.UPSERT() != nil:
+	case ctx.UPSERT() != nil:
 		onConflict.Action = ast.OnConflictAction_UPSERT
-	case n.REPLACE() != nil:
+	case ctx.REPLACE() != nil:
 		onConflict.Action = ast.OnConflictAction_REPLACE
 	}
 
 	var cols *ast.List
 	var source ast.Node
-	if nVal := n.Into_values_source(); nVal != nil {
+	if nVal := ctx.Into_values_source(); nVal != nil {
 		// todo: handle default values when implemented
 
 		if pureCols := nVal.Pure_column_list(); pureCols != nil {
@@ -778,20 +864,35 @@ func (c *cc) convertInto_table_stmtContext(n *parser.Into_table_stmtContext) ast
 			switch {
 			case valSource.Values_stmt() != nil:
 				source = &ast.SelectStmt{
-					ValuesLists: c.convert(valSource.Values_stmt()).(*ast.List),
-					FromClause:  &ast.List{},
-					TargetList:  &ast.List{},
+					ValuesLists: func() *ast.List {
+						if valuesResult := valSource.Values_stmt().Accept(c); valuesResult != nil {
+							if valuesList, ok := valuesResult.(*ast.List); ok {
+								return valuesList
+							}
+						}
+						return &ast.List{}
+					}(),
+					FromClause: &ast.List{},
+					TargetList: &ast.List{},
 				}
 
 			case valSource.Select_stmt() != nil:
-				source = c.convert(valSource.Select_stmt())
+				if selectResult := valSource.Select_stmt().Accept(c); selectResult != nil {
+					if selectNode, ok := selectResult.(ast.Node); ok {
+						source = selectNode
+					}
+				}
 			}
 		}
 	}
 
 	returning := &ast.List{}
-	if ret := n.Returning_columns_list(); ret != nil {
-		returning = c.convert(ret).(*ast.List)
+	if ret := ctx.Returning_columns_list(); ret != nil {
+		if retResult := ret.Accept(c); retResult != nil {
+			if retList, ok := retResult.(*ast.List); ok {
+				returning = retList
+			}
+		}
 	}
 
 	stmts := &ast.InsertStmt{
@@ -805,16 +906,18 @@ func (c *cc) convertInto_table_stmtContext(n *parser.Into_table_stmtContext) ast
 	return stmts
 }
 
-func (c *cc) convertValues_stmtContext(n *parser.Values_stmtContext) ast.Node {
+func (c *cc) VisitValues_stmt(ctx *parser.Values_stmtContext) interface{} {
 	mainList := &ast.List{}
 
-	for _, rowCtx := range n.Values_source_row_list().AllValues_source_row() {
+	for _, rowCtx := range ctx.Values_source_row_list().AllValues_source_row() {
 		rowList := &ast.List{}
 		exprListCtx := rowCtx.Expr_list().(*parser.Expr_listContext)
 
 		for _, exprCtx := range exprListCtx.AllExpr() {
-			if converted := c.convert(exprCtx); converted != nil {
-				rowList.Items = append(rowList.Items, converted)
+			if converted := exprCtx.Accept(c); converted != nil {
+				if convertedNode, ok := converted.(ast.Node); ok {
+					rowList.Items = append(rowList.Items, convertedNode)
+				}
 			}
 		}
 
@@ -825,23 +928,23 @@ func (c *cc) convertValues_stmtContext(n *parser.Values_stmtContext) ast.Node {
 	return mainList
 }
 
-func (c *cc) convertReturning_columns_listContext(n *parser.Returning_columns_listContext) ast.Node {
+func (c *cc) VisitReturning_columns_list(ctx *parser.Returning_columns_listContext) interface{} {
 	list := &ast.List{Items: []ast.Node{}}
 
-	if n.ASTERISK() != nil {
+	if ctx.ASTERISK() != nil {
 		target := &ast.ResTarget{
 			Indirection: &ast.List{},
 			Val: &ast.ColumnRef{
 				Fields:   &ast.List{Items: []ast.Node{&ast.A_Star{}}},
-				Location: c.pos(n.ASTERISK().GetSymbol()),
+				Location: c.pos(ctx.ASTERISK().GetSymbol()),
 			},
-			Location: c.pos(n.ASTERISK().GetSymbol()),
+			Location: c.pos(ctx.ASTERISK().GetSymbol()),
 		}
 		list.Items = append(list.Items, target)
 		return list
 	}
 
-	for _, idCtx := range n.AllAn_id() {
+	for _, idCtx := range ctx.AllAn_id() {
 		target := &ast.ResTarget{
 			Indirection: &ast.List{},
 			Val: &ast.ColumnRef{
@@ -858,8 +961,8 @@ func (c *cc) convertReturning_columns_listContext(n *parser.Returning_columns_li
 	return list
 }
 
-func (c *cc) convertSelectStmtContext(n *parser.Select_stmtContext) ast.Node {
-	skp := n.Select_kind_parenthesis(0)
+func (c *cc) VisitSelect_stmt(ctx *parser.Select_stmtContext) interface{} {
+	skp := ctx.Select_kind_parenthesis(0)
 	if skp == nil {
 		return nil
 	}
@@ -875,65 +978,76 @@ func (c *cc) convertSelectStmtContext(n *parser.Select_stmtContext) ast.Node {
 
 	switch {
 	case sk.Process_core() != nil:
-		cnode := c.convert(sk.Process_core())
-		stmt, ok := cnode.(*ast.SelectStmt)
-		if !ok {
-			return nil
+		if cnode := sk.Process_core().Accept(c); cnode != nil {
+			if stmt, ok := cnode.(*ast.SelectStmt); ok {
+				selectStmt = stmt
+			}
 		}
-		selectStmt = stmt
 	case sk.Select_core() != nil:
-		cnode := c.convert(sk.Select_core())
-		stmt, ok := cnode.(*ast.SelectStmt)
-		if !ok {
-			return nil
+		if cnode := sk.Select_core().Accept(c); cnode != nil {
+			if stmt, ok := cnode.(*ast.SelectStmt); ok {
+				selectStmt = stmt
+			}
 		}
-		selectStmt = stmt
 	case sk.Reduce_core() != nil:
-		cnode := c.convert(sk.Reduce_core())
-		stmt, ok := cnode.(*ast.SelectStmt)
-		if !ok {
-			return nil
+		if cnode := sk.Reduce_core().Accept(c); cnode != nil {
+			if stmt, ok := cnode.(*ast.SelectStmt); ok {
+				selectStmt = stmt
+			}
 		}
-		selectStmt = stmt
 	}
 
-	// todo: cover process and reduce core,
-	// todo: cover LIMIT and OFFSET
+	// Handle LIMIT and OFFSET
+	if partial.LIMIT() != nil {
+		// Get LIMIT expression
+		if limitExprs := partial.AllExpr(); len(limitExprs) > 0 {
+			if limitResult := limitExprs[0].Accept(c); limitResult != nil {
+				if limitNode, ok := limitResult.(ast.Node); ok {
+					selectStmt.LimitCount = limitNode
+				}
+			}
+		}
+
+		// Get OFFSET expression (second expr if present)
+		if limitExprs := partial.AllExpr(); len(limitExprs) > 1 {
+			if offsetResult := limitExprs[1].Accept(c); offsetResult != nil {
+				if offsetNode, ok := offsetResult.(ast.Node); ok {
+					selectStmt.LimitOffset = offsetNode
+				}
+			}
+		}
+	}
 
 	return selectStmt
 }
 
-func (c *cc) convertSelectCoreContext(n *parser.Select_coreContext) ast.Node {
+func (c *cc) VisitSelect_core(ctx *parser.Select_coreContext) interface{} {
 	stmt := &ast.SelectStmt{
 		TargetList: &ast.List{},
 		FromClause: &ast.List{},
 	}
-	if n.Opt_set_quantifier() != nil {
-		oq := n.Opt_set_quantifier()
+	if ctx.Opt_set_quantifier() != nil {
+		oq := ctx.Opt_set_quantifier()
 		if oq.DISTINCT() != nil {
 			// todo: add distinct support
 			stmt.DistinctClause = &ast.List{}
 		}
 	}
-	resultCols := n.AllResult_column()
+	resultCols := ctx.AllResult_column()
 	if len(resultCols) > 0 {
 		var items []ast.Node
 		for _, rc := range resultCols {
-			resCol, ok := rc.(*parser.Result_columnContext)
-			if !ok {
-				continue
-			}
-			convNode := c.convertResultColumn(resCol)
+			convNode := rc.Accept(c)
 			if convNode != nil {
-				items = append(items, convNode)
+				items = append(items, convNode.(ast.Node))
 			}
 		}
 		stmt.TargetList = &ast.List{
 			Items: items,
 		}
 	}
-	jsList := n.AllJoin_source()
-	if len(n.AllFROM()) > 0 && len(jsList) > 0 {
+	jsList := ctx.AllJoin_source()
+	if len(ctx.AllFROM()) > 0 && len(jsList) > 0 {
 		var fromItems []ast.Node
 		for _, js := range jsList {
 			jsCon, ok := js.(*parser.Join_sourceContext)
@@ -941,66 +1055,74 @@ func (c *cc) convertSelectCoreContext(n *parser.Select_coreContext) ast.Node {
 				continue
 			}
 
-			joinNode := c.convertJoinSource(jsCon)
+			joinNode := jsCon.Accept(c)
 			if joinNode != nil {
-				fromItems = append(fromItems, joinNode)
+				fromItems = append(fromItems, joinNode.(ast.Node))
 			}
 		}
 		stmt.FromClause = &ast.List{
 			Items: fromItems,
 		}
 	}
-	if n.WHERE() != nil {
-		whereCtx := n.Expr(0)
+	if ctx.WHERE() != nil {
+		whereCtx := ctx.Expr(0)
 		if whereCtx != nil {
-			stmt.WhereClause = c.convert(whereCtx)
+			if whereResult := whereCtx.Accept(c); whereResult != nil {
+				if whereNode, ok := whereResult.(ast.Node); ok {
+					stmt.WhereClause = whereNode
+				}
+			}
 		}
 	}
 	return stmt
 }
 
-func (c *cc) convertResultColumn(n *parser.Result_columnContext) ast.Node {
+func (c *cc) VisitResult_column(ctx *parser.Result_columnContext) interface{} {
 	// todo: support opt_id_prefix
 	target := &ast.ResTarget{
-		Location: c.pos(n.GetStart()),
+		Location: c.pos(ctx.GetStart()),
 	}
 	var val ast.Node
-	iexpr := n.Expr()
+	iexpr := ctx.Expr()
 	switch {
-	case n.ASTERISK() != nil:
-		val = c.convertWildCardField(n)
+	case ctx.ASTERISK() != nil:
+		val = c.convertWildCardField(ctx)
 	case iexpr != nil:
-		val = c.convert(iexpr)
+		if iexprResult := iexpr.Accept(c); iexprResult != nil {
+			if iexprNode, ok := iexprResult.(ast.Node); ok {
+				val = iexprNode
+			}
+		}
 	}
 
 	if val == nil {
 		return nil
 	}
 	switch {
-	case n.AS() != nil && n.An_id_or_type() != nil:
-		name := parseAnIdOrType(n.An_id_or_type())
+	case ctx.AS() != nil && ctx.An_id_or_type() != nil:
+		name := parseAnIdOrType(ctx.An_id_or_type())
 		target.Name = &name
-	case n.An_id_as_compat() != nil: //nolint
+	case ctx.An_id_as_compat() != nil: //nolint
 		// todo: parse as_compat
 	}
 	target.Val = val
 	return target
 }
 
-func (c *cc) convertJoinSource(n *parser.Join_sourceContext) ast.Node {
-	if n == nil {
+func (c *cc) VisitJoin_source(ctx *parser.Join_sourceContext) interface{} {
+	if ctx == nil {
 		return nil
 	}
-	fsList := n.AllFlatten_source()
+	fsList := ctx.AllFlatten_source()
 	if len(fsList) == 0 {
 		return nil
 	}
-	joinOps := n.AllJoin_op()
-	joinConstraints := n.AllJoin_constraint()
+	joinOps := ctx.AllJoin_op()
+	joinConstraints := ctx.AllJoin_constraint()
 
 	// todo: add ANY support
 
-	leftNode := c.convertFlattenSource(fsList[0])
+	leftNode := fsList[0].Accept(c)
 	if leftNode == nil {
 		return nil
 	}
@@ -1008,13 +1130,13 @@ func (c *cc) convertJoinSource(n *parser.Join_sourceContext) ast.Node {
 		if i+1 >= len(fsList) {
 			break
 		}
-		rightNode := c.convertFlattenSource(fsList[i+1])
+		rightNode := fsList[i+1].Accept(c)
 		if rightNode == nil {
 			return leftNode
 		}
 		jexpr := &ast.JoinExpr{
-			Larg: leftNode,
-			Rarg: rightNode,
+			Larg: leftNode.(ast.Node),
+			Rarg: rightNode.(ast.Node),
 		}
 		if jopCtx.NATURAL() != nil {
 			jexpr.IsNatural = true
@@ -1039,7 +1161,11 @@ func (c *cc) convertJoinSource(n *parser.Join_sourceContext) ast.Node {
 				switch {
 				case jc.ON() != nil:
 					if exprCtx := jc.Expr(); exprCtx != nil {
-						jexpr.Quals = c.convert(exprCtx)
+						if exprResult := exprCtx.Accept(c); exprResult != nil {
+							if exprNode, ok := exprResult.(ast.Node); ok {
+								jexpr.Quals = exprNode
+							}
+						}
 					}
 				case jc.USING() != nil:
 					if pureListCtx := jc.Pure_column_or_named_list(); pureListCtx != nil {
@@ -1049,8 +1175,11 @@ func (c *cc) convertJoinSource(n *parser.Join_sourceContext) ast.Node {
 							if anID := pureCtx.An_id(); anID != nil {
 								using.Items = append(using.Items, NewIdentifier(parseAnId(anID)))
 							} else if bp := pureCtx.Bind_parameter(); bp != nil {
-								bindPar := c.convert(bp)
-								using.Items = append(using.Items, bindPar)
+								if bindParResult := bp.Accept(c); bindParResult != nil {
+									if bindParNode, ok := bindParResult.(ast.Node); ok {
+										using.Items = append(using.Items, bindParNode)
+									}
+								}
 							}
 						}
 						jexpr.UsingClause = &using
@@ -1063,11 +1192,11 @@ func (c *cc) convertJoinSource(n *parser.Join_sourceContext) ast.Node {
 	return leftNode
 }
 
-func (c *cc) convertFlattenSource(n parser.IFlatten_sourceContext) ast.Node {
-	if n == nil {
+func (c *cc) VisitFlatten_source(ctx *parser.Flatten_sourceContext) interface{} {
+	if ctx == nil {
 		return nil
 	}
-	nss := n.Named_single_source()
+	nss := ctx.Named_single_source()
 	if nss == nil {
 		return nil
 	}
@@ -1075,11 +1204,11 @@ func (c *cc) convertFlattenSource(n parser.IFlatten_sourceContext) ast.Node {
 	if !ok {
 		return nil
 	}
-	return c.convertNamedSingleSource(namedSingleSource)
+	return namedSingleSource.Accept(c)
 }
 
-func (c *cc) convertNamedSingleSource(n *parser.Named_single_sourceContext) ast.Node {
-	ss := n.Single_source()
+func (c *cc) VisitNamed_single_source(ctx *parser.Named_single_sourceContext) interface{} {
+	ss := ctx.Single_source()
 	if ss == nil {
 		return nil
 	}
@@ -1087,88 +1216,90 @@ func (c *cc) convertNamedSingleSource(n *parser.Named_single_sourceContext) ast.
 	if !ok {
 		return nil
 	}
-	base := c.convertSingleSource(SingleSource)
+	base := SingleSource.Accept(c)
 
-	if n.AS() != nil && n.An_id() != nil {
-		aliasText := parseAnId(n.An_id())
+	if ctx.AS() != nil && ctx.An_id() != nil {
+		aliasText := parseAnId(ctx.An_id())
 		switch source := base.(type) {
 		case *ast.RangeVar:
 			source.Alias = &ast.Alias{Aliasname: &aliasText}
 		case *ast.RangeSubselect:
 			source.Alias = &ast.Alias{Aliasname: &aliasText}
 		}
-	} else if n.An_id_as_compat() != nil { //nolint
+	} else if ctx.An_id_as_compat() != nil { //nolint
 		// todo: parse as_compat
 	}
 	return base
 }
 
-func (c *cc) convertSingleSource(n *parser.Single_sourceContext) ast.Node {
-	if n.Table_ref() != nil {
-		tableName := n.Table_ref().GetText() // !! debug !!
+func (c *cc) VisitSingle_source(ctx *parser.Single_sourceContext) interface{} {
+	if ctx.Table_ref() != nil {
+		tableName := ctx.Table_ref().GetText() // !! debug !!
 		return &ast.RangeVar{
 			Relname:  &tableName,
-			Location: c.pos(n.GetStart()),
+			Location: c.pos(ctx.GetStart()),
 		}
 	}
 
-	if n.Select_stmt() != nil {
-		subquery := c.convert(n.Select_stmt())
-		return &ast.RangeSubselect{
-			Subquery: subquery,
+	if ctx.Select_stmt() != nil {
+		if subqueryResult := ctx.Select_stmt().Accept(c); subqueryResult != nil {
+			if subqueryNode, ok := subqueryResult.(ast.Node); ok {
+				return &ast.RangeSubselect{
+					Subquery: subqueryNode,
+				}
+			}
 		}
-
 	}
 	// todo: Values stmt
 
 	return nil
 }
 
-func (c *cc) convertBindParameter(n *parser.Bind_parameterContext) ast.Node {
-	// !!debug later!!
-	if n.DOLLAR() != nil {
-		if n.TRUE() != nil {
-			return &ast.A_Const{Val: &ast.Boolean{Boolval: true}, Location: c.pos(n.GetStart())}
+func (c *cc) VisitBind_parameter(ctx *parser.Bind_parameterContext) interface{} {
+	if ctx.DOLLAR() != nil {
+		if ctx.TRUE() != nil {
+			return &ast.A_Const{Val: &ast.Boolean{Boolval: true}, Location: c.pos(ctx.GetStart())}
 		}
-		if n.FALSE() != nil {
-			return &ast.A_Const{Val: &ast.Boolean{Boolval: false}, Location: c.pos(n.GetStart())}
+		if ctx.FALSE() != nil {
+			return &ast.A_Const{Val: &ast.Boolean{Boolval: false}, Location: c.pos(ctx.GetStart())}
 		}
 
-		if an := n.An_id_or_type(); an != nil {
+		if an := ctx.An_id_or_type(); an != nil {
 			idText := parseAnIdOrType(an)
 			return &ast.A_Expr{
 				Name:     &ast.List{Items: []ast.Node{&ast.String{Str: "@"}}},
 				Rexpr:    &ast.String{Str: idText},
-				Location: c.pos(n.GetStart()),
+				Location: c.pos(ctx.GetStart()),
 			}
 		}
 		c.paramCount++
 		return &ast.ParamRef{
 			Number:   c.paramCount,
-			Location: c.pos(n.GetStart()),
+			Location: c.pos(ctx.GetStart()),
 			Dollar:   true,
+			Plike:    true,
 		}
 	}
 	return &ast.TODO{}
 }
 
-func (c *cc) convertWildCardField(n *parser.Result_columnContext) *ast.ColumnRef {
-	prefixCtx := n.Opt_id_prefix()
-	prefix := c.convertOptIdPrefix(prefixCtx)
+func (c *cc) convertWildCardField(ctx *parser.Result_columnContext) *ast.ColumnRef {
+	prefixCtx := ctx.Opt_id_prefix()
+	prefix := prefixCtx.Accept(c)
 
 	items := []ast.Node{}
-	if prefix != "" {
-		items = append(items, NewIdentifier(prefix))
+	if prefix != nil {
+		items = append(items, NewIdentifier(prefix.(string)))
 	}
 
 	items = append(items, &ast.A_Star{})
 	return &ast.ColumnRef{
 		Fields:   &ast.List{Items: items},
-		Location: c.pos(n.GetStart()),
+		Location: c.pos(ctx.GetStart()),
 	}
 }
 
-func (c *cc) convertOptIdPrefix(ctx parser.IOpt_id_prefixContext) string {
+func (c *cc) VisitOptIdPrefix(ctx *parser.Opt_id_prefixContext) interface{} {
 	if ctx == nil {
 		return ""
 	}
@@ -1178,19 +1309,19 @@ func (c *cc) convertOptIdPrefix(ctx parser.IOpt_id_prefixContext) string {
 	return ""
 }
 
-func (c *cc) convertCreate_table_stmtContext(n *parser.Create_table_stmtContext) ast.Node {
+func (c *cc) VisitCreate_table_stmt(ctx *parser.Create_table_stmtContext) interface{} {
 	stmt := &ast.CreateTableStmt{
-		Name:        parseTableName(n.Simple_table_ref().Simple_table_ref_core()),
-		IfNotExists: n.EXISTS() != nil,
+		Name:        parseTableName(ctx.Simple_table_ref().Simple_table_ref_core()),
+		IfNotExists: ctx.EXISTS() != nil,
 	}
-	for _, idef := range n.AllCreate_table_entry() {
+	for _, idef := range ctx.AllCreate_table_entry() {
 		if def, ok := idef.(*parser.Create_table_entryContext); ok {
 			switch {
 			case def.Column_schema() != nil:
 				if colCtx, ok := def.Column_schema().(*parser.Column_schemaContext); ok {
-					colDef := c.convertColumnSchema(colCtx)
+					colDef := colCtx.Accept(c)
 					if colDef != nil {
-						stmt.Cols = append(stmt.Cols, colDef)
+						stmt.Cols = append(stmt.Cols, colDef.(*ast.ColumnDef))
 					}
 				}
 			case def.Table_constraint() != nil:
@@ -1234,17 +1365,16 @@ func (c *cc) convertCreate_table_stmtContext(n *parser.Create_table_stmtContext)
 	return stmt
 }
 
-func (c *cc) convertColumnSchema(n *parser.Column_schemaContext) *ast.ColumnDef {
-
+func (c *cc) VisitColumn_schema(ctx *parser.Column_schemaContext) interface{} {
 	col := &ast.ColumnDef{}
 
-	if anId := n.An_id_schema(); anId != nil {
+	if anId := ctx.An_id_schema(); anId != nil {
 		col.Colname = identifier(parseAnIdSchema(anId))
 	}
-	if tnb := n.Type_name_or_bind(); tnb != nil {
-		col.TypeName = c.convertTypeNameOrBind(tnb)
+	if tnb := ctx.Type_name_or_bind(); tnb != nil {
+		col.TypeName = tnb.Accept(c).(*ast.TypeName)
 	}
-	if colCons := n.Opt_column_constraints(); colCons != nil {
+	if colCons := ctx.Opt_column_constraints(); colCons != nil {
 		col.IsNotNull = colCons.NOT() != nil && colCons.NULL() != nil
 		//todo: cover exprs if needed
 	}
@@ -1253,37 +1383,37 @@ func (c *cc) convertColumnSchema(n *parser.Column_schemaContext) *ast.ColumnDef 
 	return col
 }
 
-func (c *cc) convertTypeNameOrBind(n parser.IType_name_or_bindContext) *ast.TypeName {
-	if t := n.Type_name(); t != nil {
-		return c.convertTypeName(t)
-	} else if b := n.Bind_parameter(); b != nil {
+func (c *cc) VisitType_name_or_bind(ctx *parser.Type_name_or_bindContext) interface{} {
+	if t := ctx.Type_name(); t != nil {
+		return t.Accept(c)
+	} else if b := ctx.Bind_parameter(); b != nil {
 		return &ast.TypeName{Name: "BIND:" + identifier(parseAnIdOrType(b.An_id_or_type()))}
 	}
 	return nil
 }
 
-func (c *cc) convertTypeName(n parser.IType_nameContext) *ast.TypeName {
-	if n == nil {
+func (c *cc) VisitType_name(ctx *parser.Type_nameContext) interface{} {
+	if ctx == nil {
 		return nil
 	}
 
-	if composite := n.Type_name_composite(); composite != nil {
-		if node := c.convertTypeNameComposite(composite); node != nil {
+	if composite := ctx.Type_name_composite(); composite != nil {
+		if node := composite.Accept(c); node != nil {
 			if typeName, ok := node.(*ast.TypeName); ok {
 				return typeName
 			}
 		}
 	}
 
-	if decimal := n.Type_name_decimal(); decimal != nil {
+	if decimal := ctx.Type_name_decimal(); decimal != nil {
 		if integerOrBinds := decimal.AllInteger_or_bind(); len(integerOrBinds) >= 2 {
 			return &ast.TypeName{
 				Name:    "Decimal",
 				TypeOid: 0,
 				Names: &ast.List{
 					Items: []ast.Node{
-						c.convertIntegerOrBind(integerOrBinds[0]),
-						c.convertIntegerOrBind(integerOrBinds[1]),
+						integerOrBinds[0].Accept(c).(ast.Node),
+						integerOrBinds[1].Accept(c).(ast.Node),
 					},
 				},
 			}
@@ -1291,7 +1421,7 @@ func (c *cc) convertTypeName(n parser.IType_nameContext) *ast.TypeName {
 	}
 
 	// Handle simple types
-	if simple := n.Type_name_simple(); simple != nil {
+	if simple := ctx.Type_name_simple(); simple != nil {
 		return &ast.TypeName{
 			Name:    simple.GetText(),
 			TypeOid: 0,
@@ -1301,12 +1431,12 @@ func (c *cc) convertTypeName(n parser.IType_nameContext) *ast.TypeName {
 	return nil
 }
 
-func (c *cc) convertIntegerOrBind(n parser.IInteger_or_bindContext) ast.Node {
-	if n == nil {
+func (c *cc) VisitInteger_or_bind(ctx *parser.Integer_or_bindContext) interface{} {
+	if ctx == nil {
 		return nil
 	}
 
-	if integer := n.Integer(); integer != nil {
+	if integer := ctx.Integer(); integer != nil {
 		val, err := parseIntegerValue(integer.GetText())
 		if err != nil {
 			return &ast.TODO{}
@@ -1314,35 +1444,35 @@ func (c *cc) convertIntegerOrBind(n parser.IInteger_or_bindContext) ast.Node {
 		return &ast.Integer{Ival: val}
 	}
 
-	if bind := n.Bind_parameter(); bind != nil {
-		return c.convertBindParameter(bind.(*parser.Bind_parameterContext))
+	if bind := ctx.Bind_parameter(); bind != nil {
+		return bind.Accept(c)
 	}
 
 	return nil
 }
 
-func (c *cc) convertTypeNameComposite(n parser.IType_name_compositeContext) ast.Node {
-	if n == nil {
+func (c *cc) VisitType_name_composite(ctx *parser.Type_name_compositeContext) interface{} {
+	if ctx == nil {
 		return nil
 	}
 
-	if opt := n.Type_name_optional(); opt != nil {
+	if opt := ctx.Type_name_optional(); opt != nil {
 		if typeName := opt.Type_name_or_bind(); typeName != nil {
 			return &ast.TypeName{
 				Name:    "Optional",
 				TypeOid: 0,
 				Names: &ast.List{
-					Items: []ast.Node{c.convertTypeNameOrBind(typeName)},
+					Items: []ast.Node{typeName.Accept(c).(ast.Node)},
 				},
 			}
 		}
 	}
 
-	if tuple := n.Type_name_tuple(); tuple != nil {
+	if tuple := ctx.Type_name_tuple(); tuple != nil {
 		if typeNames := tuple.AllType_name_or_bind(); len(typeNames) > 0 {
 			var items []ast.Node
 			for _, tn := range typeNames {
-				items = append(items, c.convertTypeNameOrBind(tn))
+				items = append(items, tn.Accept(c).(ast.Node))
 			}
 			return &ast.TypeName{
 				Name:    "Tuple",
@@ -1352,7 +1482,7 @@ func (c *cc) convertTypeNameComposite(n parser.IType_name_compositeContext) ast.
 		}
 	}
 
-	if struct_ := n.Type_name_struct(); struct_ != nil {
+	if struct_ := ctx.Type_name_struct(); struct_ != nil {
 		if structArgs := struct_.AllStruct_arg(); len(structArgs) > 0 {
 			var items []ast.Node
 			for range structArgs {
@@ -1367,7 +1497,7 @@ func (c *cc) convertTypeNameComposite(n parser.IType_name_compositeContext) ast.
 		}
 	}
 
-	if variant := n.Type_name_variant(); variant != nil {
+	if variant := ctx.Type_name_variant(); variant != nil {
 		if variantArgs := variant.AllVariant_arg(); len(variantArgs) > 0 {
 			var items []ast.Node
 			for range variantArgs {
@@ -1382,70 +1512,70 @@ func (c *cc) convertTypeNameComposite(n parser.IType_name_compositeContext) ast.
 		}
 	}
 
-	if list := n.Type_name_list(); list != nil {
+	if list := ctx.Type_name_list(); list != nil {
 		if typeName := list.Type_name_or_bind(); typeName != nil {
 			return &ast.TypeName{
 				Name:    "List",
 				TypeOid: 0,
 				Names: &ast.List{
-					Items: []ast.Node{c.convertTypeNameOrBind(typeName)},
+					Items: []ast.Node{typeName.Accept(c).(ast.Node)},
 				},
 			}
 		}
 	}
 
-	if stream := n.Type_name_stream(); stream != nil {
+	if stream := ctx.Type_name_stream(); stream != nil {
 		if typeName := stream.Type_name_or_bind(); typeName != nil {
 			return &ast.TypeName{
 				Name:    "Stream",
 				TypeOid: 0,
 				Names: &ast.List{
-					Items: []ast.Node{c.convertTypeNameOrBind(typeName)},
+					Items: []ast.Node{typeName.Accept(c).(ast.Node)},
 				},
 			}
 		}
 	}
 
-	if flow := n.Type_name_flow(); flow != nil {
+	if flow := ctx.Type_name_flow(); flow != nil {
 		if typeName := flow.Type_name_or_bind(); typeName != nil {
 			return &ast.TypeName{
 				Name:    "Flow",
 				TypeOid: 0,
 				Names: &ast.List{
-					Items: []ast.Node{c.convertTypeNameOrBind(typeName)},
+					Items: []ast.Node{typeName.Accept(c).(ast.Node)},
 				},
 			}
 		}
 	}
 
-	if dict := n.Type_name_dict(); dict != nil {
+	if dict := ctx.Type_name_dict(); dict != nil {
 		if typeNames := dict.AllType_name_or_bind(); len(typeNames) >= 2 {
 			return &ast.TypeName{
 				Name:    "Dict",
 				TypeOid: 0,
 				Names: &ast.List{
 					Items: []ast.Node{
-						c.convertTypeNameOrBind(typeNames[0]),
-						c.convertTypeNameOrBind(typeNames[1]),
+						typeNames[0].Accept(c).(ast.Node),
+						typeNames[1].Accept(c).(ast.Node),
 					},
 				},
 			}
 		}
 	}
 
-	if set := n.Type_name_set(); set != nil {
+	if set := ctx.Type_name_set(); set != nil {
 		if typeName := set.Type_name_or_bind(); typeName != nil {
 			return &ast.TypeName{
 				Name:    "Set",
 				TypeOid: 0,
 				Names: &ast.List{
-					Items: []ast.Node{c.convertTypeNameOrBind(typeName)},
+					Items: []ast.Node{typeName.Accept(c).(ast.Node)},
 				},
 			}
 		}
 	}
 
-	if enum := n.Type_name_enum(); enum != nil {
+	if enum := ctx.Type_name_enum(); enum != nil {
 		if typeTags := enum.AllType_name_tag(); len(typeTags) > 0 {
 			var items []ast.Node
 			for range typeTags { // todo: Handle enum tags
@@ -1459,7 +1589,7 @@ func (c *cc) convertTypeNameComposite(n parser.IType_name_compositeContext) ast.
 		}
 	}
 
-	if resource := n.Type_name_resource(); resource != nil {
+	if resource := ctx.Type_name_resource(); resource != nil {
 		if typeTag := resource.Type_name_tag(); typeTag != nil {
 			// TODO: Handle resource tag
 			return &ast.TypeName{
@@ -1472,7 +1602,7 @@ func (c *cc) convertTypeNameComposite(n parser.IType_name_compositeContext) ast.
 		}
 	}
 
-	if tagged := n.Type_name_tagged(); tagged != nil {
+	if tagged := ctx.Type_name_tagged(); tagged != nil {
 		if typeName := tagged.Type_name_or_bind(); typeName != nil {
 			if typeTag := tagged.Type_name_tag(); typeTag != nil {
 				// TODO: Handle tagged type and tag
@@ -1481,7 +1611,7 @@ func (c *cc) convertTypeNameComposite(n parser.IType_name_compositeContext) ast.
 					TypeOid: 0,
 					Names: &ast.List{
 						Items: []ast.Node{
-							c.convertTypeNameOrBind(typeName),
+							typeName.Accept(c).(ast.Node),
 							&ast.TODO{},
 						},
 					},
@@ -1490,7 +1620,7 @@ func (c *cc) convertTypeNameComposite(n parser.IType_name_compositeContext) ast.
 		}
 	}
 
-	if callable := n.Type_name_callable(); callable != nil {
+	if callable := ctx.Type_name_callable(); callable != nil {
 		// TODO: Handle callable argument list and return type
 		return &ast.TypeName{
 			Name:    "Callable",
@@ -1504,434 +1634,423 @@ func (c *cc) convertTypeNameComposite(n parser.IType_name_compositeContext) ast.
 	return nil
 }
 
-func (c *cc) convertSqlStmtCore(n parser.ISql_stmt_coreContext) ast.Node {
-	if n == nil {
+func (c *cc) VisitSql_stmt_core(ctx *parser.Sql_stmt_coreContext) interface{} {
+	if ctx == nil {
 		return nil
 	}
 
-	if stmt := n.Pragma_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Pragma_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Select_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Select_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Named_nodes_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Named_nodes_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Create_table_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Create_table_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Drop_table_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Drop_table_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Use_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Use_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Into_table_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Into_table_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Commit_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Commit_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Update_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Update_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Delete_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Delete_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Rollback_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Rollback_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Declare_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Declare_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Import_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Import_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Export_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Export_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Alter_table_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Alter_table_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Alter_external_table_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Alter_external_table_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Do_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Do_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Define_action_or_subquery_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Define_action_or_subquery_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.If_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.If_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.For_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.For_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Values_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Values_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Create_user_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Create_user_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Alter_user_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Alter_user_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Create_group_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Create_group_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Alter_group_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Alter_group_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Drop_role_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Drop_role_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Create_object_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Create_object_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Alter_object_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Alter_object_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Drop_object_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Drop_object_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Create_external_data_source_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Create_external_data_source_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Alter_external_data_source_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Alter_external_data_source_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Drop_external_data_source_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Drop_external_data_source_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Create_replication_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Create_replication_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Drop_replication_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Drop_replication_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Create_topic_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Create_topic_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Alter_topic_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Alter_topic_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Drop_topic_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Drop_topic_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Grant_permissions_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Grant_permissions_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Revoke_permissions_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Revoke_permissions_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Alter_table_store_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Alter_table_store_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Upsert_object_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Upsert_object_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Create_view_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Create_view_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Drop_view_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Drop_view_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Alter_replication_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Alter_replication_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Create_resource_pool_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Create_resource_pool_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Alter_resource_pool_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Alter_resource_pool_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Drop_resource_pool_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Drop_resource_pool_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Create_backup_collection_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Create_backup_collection_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Alter_backup_collection_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Alter_backup_collection_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Drop_backup_collection_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Drop_backup_collection_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Analyze_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Analyze_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Create_resource_pool_classifier_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Create_resource_pool_classifier_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Alter_resource_pool_classifier_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Alter_resource_pool_classifier_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Drop_resource_pool_classifier_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Drop_resource_pool_classifier_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Backup_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Backup_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Restore_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Restore_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
-	if stmt := n.Alter_sequence_stmt(); stmt != nil {
-		return c.convert(stmt)
+	if stmt := ctx.Alter_sequence_stmt(); stmt != nil {
+		return stmt.Accept(c)
 	}
 	return nil
 }
 
-func (c *cc) convertExpr(n *parser.ExprContext) ast.Node {
-	if n == nil {
+func (c *cc) VisitExpr(ctx *parser.ExprContext) interface{} {
+	if ctx == nil {
 		return nil
 	}
 
-	if tn := n.Type_name_composite(); tn != nil {
-		return c.convertTypeNameComposite(tn)
+	if tn := ctx.Type_name_composite(); tn != nil {
+		return tn.Accept(c)
 	}
 
-	orSubs := n.AllOr_subexpr()
+	orSubs := ctx.AllOr_subexpr()
 	if len(orSubs) == 0 {
 		return nil
 	}
 
-	orSub, ok := orSubs[0].(*parser.Or_subexprContext)
-	if !ok {
-		return nil
-	}
-
-	left := c.convertOrSubExpr(orSub)
+	left := orSubs[0].Accept(c)
 	for i := 1; i < len(orSubs); i++ {
-		orSub, ok = orSubs[i].(*parser.Or_subexprContext)
-		if !ok {
-			return nil
-		}
-		right := c.convertOrSubExpr(orSub)
+		right := orSubs[i].Accept(c)
+
 		left = &ast.BoolExpr{
 			Boolop:   ast.BoolExprTypeOr,
-			Args:     &ast.List{Items: []ast.Node{left, right}},
-			Location: c.pos(n.GetStart()),
+			Args:     &ast.List{Items: []ast.Node{left.(ast.Node), right.(ast.Node)}},
+			Location: c.pos(ctx.GetStart()),
 		}
 	}
 	return left
 }
 
-func (c *cc) convertOrSubExpr(n *parser.Or_subexprContext) ast.Node {
-	if n == nil {
+func (c *cc) VisitOr_subexpr(ctx *parser.Or_subexprContext) interface{} {
+	if ctx == nil {
 		return nil
 	}
-	andSubs := n.AllAnd_subexpr()
+	andSubs := ctx.AllAnd_subexpr()
 	if len(andSubs) == 0 {
 		return nil
 	}
-	andSub, ok := andSubs[0].(*parser.And_subexprContext)
-	if !ok {
-		return nil
-	}
 
-	left := c.convertAndSubexpr(andSub)
+	left := andSubs[0].Accept(c)
 	for i := 1; i < len(andSubs); i++ {
-		andSub, ok = andSubs[i].(*parser.And_subexprContext)
-		if !ok {
-			return nil
-		}
-		right := c.convertAndSubexpr(andSub)
+		right := andSubs[i].Accept(c)
 		left = &ast.BoolExpr{
 			Boolop:   ast.BoolExprTypeAnd,
-			Args:     &ast.List{Items: []ast.Node{left, right}},
-			Location: c.pos(n.GetStart()),
+			Args:     &ast.List{Items: []ast.Node{left.(ast.Node), right.(ast.Node)}},
+			Location: c.pos(ctx.GetStart()),
 		}
 	}
 	return left
 }
 
-func (c *cc) convertAndSubexpr(n *parser.And_subexprContext) ast.Node {
-	if n == nil {
+func (c *cc) VisitAnd_subexpr(ctx *parser.And_subexprContext) interface{} {
+	if ctx == nil {
 		return nil
 	}
 
-	xors := n.AllXor_subexpr()
+	xors := ctx.AllXor_subexpr()
 	if len(xors) == 0 {
 		return nil
 	}
 
-	xor, ok := xors[0].(*parser.Xor_subexprContext)
-	if !ok {
-		return nil
-	}
-
-	left := c.convertXorSubexpr(xor)
+	left := xors[0].Accept(c)
 	for i := 1; i < len(xors); i++ {
-		xor, ok = xors[i].(*parser.Xor_subexprContext)
-		if !ok {
-			return nil
-		}
-		right := c.convertXorSubexpr(xor)
+		right := xors[i].Accept(c)
 		left = &ast.A_Expr{
 			Name:     &ast.List{Items: []ast.Node{&ast.String{Str: "XOR"}}},
-			Lexpr:    left,
-			Rexpr:    right,
-			Location: c.pos(n.GetStart()),
+			Lexpr:    left.(ast.Node),
+			Rexpr:    right.(ast.Node),
+			Location: c.pos(ctx.GetStart()),
 		}
 	}
 	return left
 }
 
-func (c *cc) convertXorSubexpr(n *parser.Xor_subexprContext) ast.Node {
-	if n == nil {
+func (c *cc) VisitXor_subexpr(ctx *parser.Xor_subexprContext) interface{} {
+	if ctx == nil {
 		return nil
 	}
-	es := n.Eq_subexpr()
+	es := ctx.Eq_subexpr()
 	if es == nil {
 		return nil
 	}
-	subExpr, ok := es.(*parser.Eq_subexprContext)
-	if !ok {
-		return nil
+	base := es.Accept(c)
+	var baseNode ast.Node
+	if baseResult, ok := base.(ast.Node); ok {
+		baseNode = baseResult
+	} else {
+		return todo("VisitXor_subexpr", ctx)
 	}
-	base := c.convertEqSubexpr(subExpr)
-	if cond := n.Cond_expr(); cond != nil {
-		condCtx, ok := cond.(*parser.Cond_exprContext)
-		if !ok {
-			return base
-		}
-
+	if cond := ctx.Cond_expr(); cond != nil {
 		switch {
-		case condCtx.IN() != nil:
-			if inExpr := condCtx.In_expr(); inExpr != nil {
-				return &ast.A_Expr{
-					Name:  &ast.List{Items: []ast.Node{&ast.String{Str: "IN"}}},
-					Lexpr: base,
-					Rexpr: c.convert(inExpr),
+		case cond.IN() != nil:
+			if inExpr := cond.In_expr(); inExpr != nil {
+				if inExprResult := inExpr.Accept(c); inExprResult != nil {
+					if inExprNode, ok := inExprResult.(ast.Node); ok {
+						return &ast.A_Expr{
+							Name:  &ast.List{Items: []ast.Node{&ast.String{Str: "IN"}}},
+							Lexpr: baseNode,
+							Rexpr: inExprNode,
+						}
+					}
 				}
 			}
-		case condCtx.BETWEEN() != nil:
-			if eqSubs := condCtx.AllEq_subexpr(); len(eqSubs) >= 2 {
-				return &ast.BetweenExpr{
-					Expr:     base,
-					Left:     c.convert(eqSubs[0]),
-					Right:    c.convert(eqSubs[1]),
-					Not:      condCtx.NOT() != nil,
-					Location: c.pos(n.GetStart()),
+		case cond.BETWEEN() != nil:
+			if eqSubs := cond.AllEq_subexpr(); len(eqSubs) >= 2 {
+				if leftResult := eqSubs[0].Accept(c); leftResult != nil {
+					if rightResult := eqSubs[1].Accept(c); rightResult != nil {
+						if leftNode, ok := leftResult.(ast.Node); ok {
+							if rightNode, ok := rightResult.(ast.Node); ok {
+								return &ast.BetweenExpr{
+									Expr:     baseNode,
+									Left:     leftNode,
+									Right:    rightNode,
+									Not:      cond.NOT() != nil,
+									Location: c.pos(ctx.GetStart()),
+								}
+							}
+						}
+					}
 				}
 			}
-		case condCtx.ISNULL() != nil:
+		case cond.ISNULL() != nil:
 			return &ast.NullTest{
-				Arg:          base,
+				Arg:          baseNode,
 				Nulltesttype: 1, // IS NULL
-				Location:     c.pos(n.GetStart()),
+				Location:     c.pos(ctx.GetStart()),
 			}
-		case condCtx.NOTNULL() != nil:
+		case cond.NOTNULL() != nil:
 			return &ast.NullTest{
-				Arg:          base,
+				Arg:          baseNode,
 				Nulltesttype: 2, // IS NOT NULL
-				Location:     c.pos(n.GetStart()),
+				Location:     c.pos(ctx.GetStart()),
 			}
-		case condCtx.IS() != nil && condCtx.NULL() != nil:
+		case cond.IS() != nil && cond.NULL() != nil:
 			return &ast.NullTest{
-				Arg:          base,
+				Arg:          baseNode,
 				Nulltesttype: 1, // IS NULL
-				Location:     c.pos(n.GetStart()),
+				Location:     c.pos(ctx.GetStart()),
 			}
-		case condCtx.IS() != nil && condCtx.NOT() != nil && condCtx.NULL() != nil:
+		case cond.IS() != nil && cond.NOT() != nil && cond.NULL() != nil:
 			return &ast.NullTest{
-				Arg:          base,
+				Arg:          baseNode,
 				Nulltesttype: 2, // IS NOT NULL
-				Location:     c.pos(n.GetStart()),
+				Location:     c.pos(ctx.GetStart()),
 			}
-		case condCtx.Match_op() != nil:
+		case cond.Match_op() != nil:
 			// debug!!!
-			matchOp := condCtx.Match_op().GetText()
-			if eqSubs := condCtx.AllEq_subexpr(); len(eqSubs) >= 1 {
-				expr := &ast.A_Expr{
-					Name:  &ast.List{Items: []ast.Node{&ast.String{Str: matchOp}}},
-					Lexpr: base,
-					Rexpr: c.convert(eqSubs[0]),
+			matchOp := cond.Match_op().GetText()
+			if eqSubs := cond.AllEq_subexpr(); len(eqSubs) >= 1 {
+				if rexprResult := eqSubs[0].Accept(c); rexprResult != nil {
+					if rexprNode, ok := rexprResult.(ast.Node); ok {
+						expr := &ast.A_Expr{
+							Name:  &ast.List{Items: []ast.Node{&ast.String{Str: matchOp}}},
+							Lexpr: baseNode,
+							Rexpr: rexprNode,
+						}
+						if cond.ESCAPE() != nil && len(eqSubs) >= 2 { //nolint
+							// todo: Add ESCAPE support
+						}
+						return expr
+					}
 				}
-				if condCtx.ESCAPE() != nil && len(eqSubs) >= 2 { //nolint
-					// todo: Add ESCAPE support
-				}
-				return expr
 			}
-		case len(condCtx.AllEQUALS()) > 0 || len(condCtx.AllEQUALS2()) > 0 ||
-			len(condCtx.AllNOT_EQUALS()) > 0 || len(condCtx.AllNOT_EQUALS2()) > 0:
+		case len(cond.AllEQUALS()) > 0 || len(cond.AllEQUALS2()) > 0 ||
+			len(cond.AllNOT_EQUALS()) > 0 || len(cond.AllNOT_EQUALS2()) > 0:
 			// debug!!!
 			var op string
 			switch {
-			case len(condCtx.AllEQUALS()) > 0:
+			case len(cond.AllEQUALS()) > 0:
 				op = "="
-			case len(condCtx.AllEQUALS2()) > 0:
+			case len(cond.AllEQUALS2()) > 0:
 				op = "=="
-			case len(condCtx.AllNOT_EQUALS()) > 0:
+			case len(cond.AllNOT_EQUALS()) > 0:
 				op = "!="
-			case len(condCtx.AllNOT_EQUALS2()) > 0:
+			case len(cond.AllNOT_EQUALS2()) > 0:
 				op = "<>"
 			}
-			if eqSubs := condCtx.AllEq_subexpr(); len(eqSubs) >= 1 {
-				return &ast.A_Expr{
-					Name:  &ast.List{Items: []ast.Node{&ast.String{Str: op}}},
-					Lexpr: base,
-					Rexpr: c.convert(eqSubs[0]),
+			if eqSubs := cond.AllEq_subexpr(); len(eqSubs) >= 1 {
+				if rexprResult := eqSubs[0].Accept(c); rexprResult != nil {
+					if rexprNode, ok := rexprResult.(ast.Node); ok {
+						return &ast.A_Expr{
+							Name:  &ast.List{Items: []ast.Node{&ast.String{Str: op}}},
+							Lexpr: baseNode,
+							Rexpr: rexprNode,
+						}
+					}
 				}
 			}
-		case len(condCtx.AllDistinct_from_op()) > 0:
+		case len(cond.AllDistinct_from_op()) > 0:
 			// debug!!!
-			distinctOps := condCtx.AllDistinct_from_op()
+			distinctOps := cond.AllDistinct_from_op()
 			for _, distinctOp := range distinctOps {
-				if eqSubs := condCtx.AllEq_subexpr(); len(eqSubs) >= 1 {
+				if eqSubs := cond.AllEq_subexpr(); len(eqSubs) >= 1 {
 					not := distinctOp.NOT() != nil
 					op := "IS DISTINCT FROM"
 					if not {
 						op = "IS NOT DISTINCT FROM"
 					}
-					return &ast.A_Expr{
-						Name:  &ast.List{Items: []ast.Node{&ast.String{Str: op}}},
-						Lexpr: base,
-						Rexpr: c.convert(eqSubs[0]),
+					if rexprResult := eqSubs[0].Accept(c); rexprResult != nil {
+						if rexprNode, ok := rexprResult.(ast.Node); ok {
+							return &ast.A_Expr{
+								Name:  &ast.List{Items: []ast.Node{&ast.String{Str: op}}},
+								Lexpr: baseNode,
+								Rexpr: rexprNode,
+							}
+						}
 					}
 				}
 			}
 		}
 	}
-	return base
+	return baseNode
 }
 
-func (c *cc) convertEqSubexpr(n *parser.Eq_subexprContext) ast.Node {
-	if n == nil {
+func (c *cc) VisitEq_subexpr(ctx *parser.Eq_subexprContext) interface{} {
+	if ctx == nil {
 		return nil
 	}
-	neqList := n.AllNeq_subexpr()
+	neqList := ctx.AllNeq_subexpr()
 	if len(neqList) == 0 {
 		return nil
 	}
-	neq, ok := neqList[0].(*parser.Neq_subexprContext)
-	if !ok {
-		return nil
-	}
-	left := c.convertNeqSubexpr(neq)
-	ops := c.collectComparisonOps(n)
+	left := neqList[0].Accept(c)
+	ops := c.collectComparisonOps(ctx)
 	for i := 1; i < len(neqList); i++ {
-		neq, ok = neqList[i].(*parser.Neq_subexprContext)
-		if !ok {
-			return nil
-		}
-		right := c.convertNeqSubexpr(neq)
+		right := neqList[i].Accept(c)
+
 		opText := ops[i-1].GetText()
 		left = &ast.A_Expr{
 			Name:     &ast.List{Items: []ast.Node{&ast.String{Str: opText}}},
-			Lexpr:    left,
-			Rexpr:    right,
-			Location: c.pos(n.GetStart()),
+			Lexpr:    left.(ast.Node),
+			Rexpr:    right.(ast.Node),
+			Location: c.pos(ctx.GetStart()),
 		}
 	}
 	return left
 }
 
-func (c *cc) collectComparisonOps(n parser.IEq_subexprContext) []antlr.TerminalNode {
+func (c *cc) collectComparisonOps(ctx parser.IEq_subexprContext) []antlr.TerminalNode {
 	var ops []antlr.TerminalNode
-	for _, child := range n.GetChildren() {
+	for _, child := range ctx.GetChildren() {
 		if tn, ok := child.(antlr.TerminalNode); ok {
 			switch tn.GetText() {
 			case "<", "<=", ">", ">=":
@@ -1942,54 +2061,42 @@ func (c *cc) collectComparisonOps(n parser.IEq_subexprContext) []antlr.TerminalN
 	return ops
 }
 
-func (c *cc) convertNeqSubexpr(n *parser.Neq_subexprContext) ast.Node {
-	if n == nil {
+func (c *cc) VisitNeq_subexpr(ctx *parser.Neq_subexprContext) interface{} {
+	if ctx == nil {
 		return nil
 	}
-	bitList := n.AllBit_subexpr()
+	bitList := ctx.AllBit_subexpr()
 	if len(bitList) == 0 {
 		return nil
 	}
 
-	bl, ok := bitList[0].(*parser.Bit_subexprContext)
-	if !ok {
-		return nil
-	}
-	left := c.convertBitSubexpr(bl)
-	ops := c.collectBitwiseOps(n)
+	left := bitList[0].Accept(c)
+	ops := c.collectBitwiseOps(ctx)
 	for i := 1; i < len(bitList); i++ {
-		bl, ok = bitList[i].(*parser.Bit_subexprContext)
-		if !ok {
-			return nil
-		}
-		right := c.convertBitSubexpr(bl)
+		right := bitList[i].Accept(c)
 		opText := ops[i-1].GetText()
 		left = &ast.A_Expr{
 			Name:     &ast.List{Items: []ast.Node{&ast.String{Str: opText}}},
-			Lexpr:    left,
-			Rexpr:    right,
-			Location: c.pos(n.GetStart()),
+			Lexpr:    left.(ast.Node),
+			Rexpr:    right.(ast.Node),
+			Location: c.pos(ctx.GetStart()),
 		}
 	}
 
-	if n.Double_question() != nil {
-		nextCtx := n.Neq_subexpr()
+	if ctx.Double_question() != nil {
+		nextCtx := ctx.Neq_subexpr()
 		if nextCtx != nil {
-			neq, ok2 := nextCtx.(*parser.Neq_subexprContext)
-			if !ok2 {
-				return nil
-			}
-			right := c.convertNeqSubexpr(neq)
+			right := nextCtx.Accept(c)
 			left = &ast.A_Expr{
 				Name:     &ast.List{Items: []ast.Node{&ast.String{Str: "??"}}},
-				Lexpr:    left,
-				Rexpr:    right,
-				Location: c.pos(n.GetStart()),
+				Lexpr:    left.(ast.Node),
+				Rexpr:    right.(ast.Node),
+				Location: c.pos(ctx.GetStart()),
 			}
 		}
 	} else {
 		// !! debug !!
-		qCount := len(n.AllQUESTION())
+		qCount := len(ctx.AllQUESTION())
 		if qCount > 0 {
 			questionOp := "?"
 			if qCount > 1 {
@@ -1997,8 +2104,8 @@ func (c *cc) convertNeqSubexpr(n *parser.Neq_subexprContext) ast.Node {
 			}
 			left = &ast.A_Expr{
 				Name:     &ast.List{Items: []ast.Node{&ast.String{Str: questionOp}}},
-				Lexpr:    left,
-				Location: c.pos(n.GetStart()),
+				Lexpr:    left.(ast.Node),
+				Location: c.pos(ctx.GetStart()),
 			}
 		}
 	}
@@ -2021,19 +2128,22 @@ func (c *cc) collectBitwiseOps(ctx parser.INeq_subexprContext) []antlr.TerminalN
 	return ops
 }
 
-func (c *cc) convertBitSubexpr(n *parser.Bit_subexprContext) ast.Node {
-	addList := n.AllAdd_subexpr()
-	left := c.convertAddSubexpr(addList[0].(*parser.Add_subexprContext))
+func (c *cc) VisitBit_subexpr(ctx *parser.Bit_subexprContext) interface{} {
+	if ctx == nil {
+		return nil
+	}
+	addList := ctx.AllAdd_subexpr()
+	left := addList[0].Accept(c)
 
-	ops := c.collectBitOps(n)
+	ops := c.collectBitOps(ctx)
 	for i := 1; i < len(addList); i++ {
-		right := c.convertAddSubexpr(addList[i].(*parser.Add_subexprContext))
+		right := addList[i].Accept(c)
 		opText := ops[i-1].GetText()
 		left = &ast.A_Expr{
 			Name:     &ast.List{Items: []ast.Node{&ast.String{Str: opText}}},
-			Lexpr:    left,
-			Rexpr:    right,
-			Location: c.pos(n.GetStart()),
+			Lexpr:    left.(ast.Node),
+			Rexpr:    right.(ast.Node),
+			Location: c.pos(ctx.GetStart()),
 		}
 	}
 	return left
@@ -2054,19 +2164,22 @@ func (c *cc) collectBitOps(ctx parser.IBit_subexprContext) []antlr.TerminalNode 
 	return ops
 }
 
-func (c *cc) convertAddSubexpr(n *parser.Add_subexprContext) ast.Node {
-	mulList := n.AllMul_subexpr()
-	left := c.convertMulSubexpr(mulList[0].(*parser.Mul_subexprContext))
+func (c *cc) VisitAdd_subexpr(ctx *parser.Add_subexprContext) interface{} {
+	if ctx == nil {
+		return nil
+	}
+	mulList := ctx.AllMul_subexpr()
+	left := mulList[0].Accept(c)
 
-	ops := c.collectAddOps(n)
+	ops := c.collectAddOps(ctx)
 	for i := 1; i < len(mulList); i++ {
-		right := c.convertMulSubexpr(mulList[i].(*parser.Mul_subexprContext))
+		right := mulList[i].Accept(c)
 		opText := ops[i-1].GetText()
 		left = &ast.A_Expr{
 			Name:     &ast.List{Items: []ast.Node{&ast.String{Str: opText}}},
-			Lexpr:    left,
-			Rexpr:    right,
-			Location: c.pos(n.GetStart()),
+			Lexpr:    left.(ast.Node),
+			Rexpr:    right.(ast.Node),
+			Location: c.pos(ctx.GetStart()),
 		}
 	}
 	return left
@@ -2085,61 +2198,70 @@ func (c *cc) collectAddOps(ctx parser.IAdd_subexprContext) []antlr.TerminalNode 
 	return ops
 }
 
-func (c *cc) convertMulSubexpr(n *parser.Mul_subexprContext) ast.Node {
-	conList := n.AllCon_subexpr()
-	left := c.convertConSubexpr(conList[0].(*parser.Con_subexprContext))
+func (c *cc) VisitMul_subexpr(ctx *parser.Mul_subexprContext) interface{} {
+	if ctx == nil {
+		return nil
+	}
+	conList := ctx.AllCon_subexpr()
+	left := conList[0].Accept(c)
 
 	for i := 1; i < len(conList); i++ {
-		right := c.convertConSubexpr(conList[i].(*parser.Con_subexprContext))
+		right := conList[i].Accept(c)
 		left = &ast.A_Expr{
 			Name:     &ast.List{Items: []ast.Node{&ast.String{Str: "||"}}},
-			Lexpr:    left,
-			Rexpr:    right,
-			Location: c.pos(n.GetStart()),
+			Lexpr:    left.(ast.Node),
+			Rexpr:    right.(ast.Node),
+			Location: c.pos(ctx.GetStart()),
 		}
 	}
 	return left
 }
 
-func (c *cc) convertConSubexpr(n *parser.Con_subexprContext) ast.Node {
-	if opCtx := n.Unary_op(); opCtx != nil {
+func (c *cc) VisitCon_subexpr(ctx *parser.Con_subexprContext) interface{} {
+	if ctx == nil {
+		return nil
+	}
+	if opCtx := ctx.Unary_op(); opCtx != nil {
 		op := opCtx.GetText()
-		operand := c.convertUnarySubexpr(n.Unary_subexpr().(*parser.Unary_subexprContext))
+		operand := ctx.Unary_subexpr().Accept(c)
 		return &ast.A_Expr{
 			Name:     &ast.List{Items: []ast.Node{&ast.String{Str: op}}},
-			Rexpr:    operand,
-			Location: c.pos(n.GetStart()),
+			Rexpr:    operand.(ast.Node),
+			Location: c.pos(ctx.GetStart()),
 		}
 	}
-	return c.convertUnarySubexpr(n.Unary_subexpr().(*parser.Unary_subexprContext))
+	return ctx.Unary_subexpr().Accept(c)
 }
 
-func (c *cc) convertUnarySubexpr(n *parser.Unary_subexprContext) ast.Node {
-	if casual := n.Unary_casual_subexpr(); casual != nil {
-		return c.convertUnaryCasualSubexpr(casual.(*parser.Unary_casual_subexprContext))
+func (c *cc) VisitUnary_subexpr(ctx *parser.Unary_subexprContext) interface{} {
+	if casual := ctx.Unary_casual_subexpr(); casual != nil {
+		return casual.Accept(c)
 	}
-	if jsonExpr := n.Json_api_expr(); jsonExpr != nil {
-		return c.convertJsonApiExpr(jsonExpr.(*parser.Json_api_exprContext))
+	if jsonExpr := ctx.Json_api_expr(); jsonExpr != nil {
+		return jsonExpr.Accept(c)
 	}
 	return nil
 }
 
-func (c *cc) convertJsonApiExpr(n *parser.Json_api_exprContext) ast.Node {
-	return todo("Json_api_exprContext", n)
+func (c *cc) VisitJson_api_expr(ctx *parser.Json_api_exprContext) interface{} {
+	return todo("Json_api_exprContext", ctx)
 }
 
-func (c *cc) convertUnaryCasualSubexpr(n *parser.Unary_casual_subexprContext) ast.Node {
+func (c *cc) VisitUnary_casual_subexpr(ctx *parser.Unary_casual_subexprContext) interface{} {
+	if ctx == nil {
+		return nil
+	}
 	var current ast.Node
 	switch {
-	case n.Id_expr() != nil:
-		current = c.convertIdExpr(n.Id_expr().(*parser.Id_exprContext))
-	case n.Atom_expr() != nil:
-		current = c.convertAtomExpr(n.Atom_expr().(*parser.Atom_exprContext))
+	case ctx.Id_expr() != nil:
+		current = ctx.Id_expr().Accept(c).(ast.Node)
+	case ctx.Atom_expr() != nil:
+		current = ctx.Atom_expr().Accept(c).(ast.Node)
 	default:
-		return todo("Unary_casual_subexprContext", n)
+		return todo("Unary_casual_subexprContext", ctx)
 	}
 
-	if suffix := n.Unary_subexpr_suffix(); suffix != nil {
+	if suffix := ctx.Unary_subexpr_suffix(); suffix != nil {
 		current = c.processSuffixChain(current, suffix.(*parser.Unary_subexpr_suffixContext))
 	}
 
@@ -2165,7 +2287,7 @@ func (c *cc) processSuffixChain(base ast.Node, suffix *parser.Unary_subexpr_suff
 }
 
 func (c *cc) handleKeySuffix(base ast.Node, keyCtx *parser.Key_exprContext) ast.Node {
-	keyNode := c.convertKey_exprContext(keyCtx)
+	keyNode := keyCtx.Accept(c).(ast.Node)
 	ind, ok := keyNode.(*ast.A_Indirection)
 	if !ok {
 		return todo("Key_exprContext", keyCtx)
@@ -2185,7 +2307,7 @@ func (c *cc) handleKeySuffix(base ast.Node, keyCtx *parser.Key_exprContext) ast.
 }
 
 func (c *cc) handleInvokeSuffix(base ast.Node, invokeCtx *parser.Invoke_exprContext, idx int) ast.Node {
-	funcCall, ok := c.convertInvoke_exprContext(invokeCtx).(*ast.FuncCall)
+	funcCall, ok := invokeCtx.Accept(c).(*ast.FuncCall)
 	if !ok {
 		return todo("Invoke_exprContext", invokeCtx)
 	}
@@ -2242,7 +2364,7 @@ func (c *cc) handleDotSuffix(base ast.Node, suffix *parser.Unary_subexpr_suffixC
 	var field ast.Node
 	switch v := next.(type) {
 	case *parser.Bind_parameterContext:
-		field = c.convertBindParameter(v)
+		field = v.Accept(c).(ast.Node)
 	case *parser.An_id_or_typeContext:
 		field = &ast.String{Str: parseAnIdOrType(v)}
 	case antlr.TerminalNode:
@@ -2266,16 +2388,16 @@ func (c *cc) handleDotSuffix(base ast.Node, suffix *parser.Unary_subexpr_suffixC
 	}
 }
 
-func (c *cc) convertKey_exprContext(n *parser.Key_exprContext) ast.Node {
-	if n.LBRACE_SQUARE() == nil || n.RBRACE_SQUARE() == nil || n.Expr() == nil {
-		return todo("Key_exprContext", n)
+func (c *cc) VisitKey_expr(ctx *parser.Key_exprContext) interface{} {
+	if ctx.LBRACE_SQUARE() == nil || ctx.RBRACE_SQUARE() == nil || ctx.Expr() == nil {
+		return todo("Key_exprContext", ctx)
 	}
 
 	stmt := &ast.A_Indirection{
 		Indirection: &ast.List{},
 	}
 
-	expr := c.convert(n.Expr())
+	expr := ctx.Expr().Accept(c).(ast.Node)
 
 	stmt.Indirection.Items = append(stmt.Indirection.Items, &ast.A_Indices{
 		Uidx: expr,
@@ -2284,14 +2406,14 @@ func (c *cc) convertKey_exprContext(n *parser.Key_exprContext) ast.Node {
 	return stmt
 }
 
-func (c *cc) convertInvoke_exprContext(n *parser.Invoke_exprContext) ast.Node {
-	if n.LPAREN() == nil || n.RPAREN() == nil {
-		return todo("Invoke_exprContext", n)
+func (c *cc) VisitInvoke_expr(ctx *parser.Invoke_exprContext) interface{} {
+	if ctx.LPAREN() == nil || ctx.RPAREN() == nil {
+		return todo("Invoke_exprContext", ctx)
 	}
 
 	distinct := false
-	if n.Opt_set_quantifier() != nil {
-		distinct = n.Opt_set_quantifier().DISTINCT() != nil
+	if ctx.Opt_set_quantifier() != nil {
+		distinct = ctx.Opt_set_quantifier().DISTINCT() != nil
 	}
 
 	stmt := &ast.FuncCall{
@@ -2299,13 +2421,13 @@ func (c *cc) convertInvoke_exprContext(n *parser.Invoke_exprContext) ast.Node {
 		Funcname:    &ast.List{},
 		AggOrder:    &ast.List{},
 		Args:        &ast.List{},
-		Location:    c.pos(n.GetStart()),
+		Location:    c.pos(ctx.GetStart()),
 	}
 
-	if nList := n.Named_expr_list(); nList != nil {
+	if nList := ctx.Named_expr_list(); nList != nil {
 		for _, namedExpr := range nList.AllNamed_expr() {
 			name := parseAnIdOrType(namedExpr.An_id_or_type())
-			expr := c.convert(namedExpr.Expr())
+			expr := namedExpr.Expr().Accept(c).(ast.Node)
 
 			var res ast.Node
 			if rt, ok := expr.(*ast.ResTarget); ok {
@@ -2325,15 +2447,15 @@ func (c *cc) convertInvoke_exprContext(n *parser.Invoke_exprContext) ast.Node {
 
 			stmt.Args.Items = append(stmt.Args.Items, res)
 		}
-	} else if n.ASTERISK() != nil {
+	} else if ctx.ASTERISK() != nil {
 		stmt.AggStar = true
 	}
 
 	return stmt
 }
 
-func (c *cc) convertIdExpr(n *parser.Id_exprContext) ast.Node {
-	if id := n.Identifier(); id != nil {
+func (c *cc) VisitId_expr(ctx *parser.Id_exprContext) interface{} {
+	if id := ctx.Identifier(); id != nil {
 		return &ast.ColumnRef{
 			Fields: &ast.List{
 				Items: []ast.Node{
@@ -2346,25 +2468,25 @@ func (c *cc) convertIdExpr(n *parser.Id_exprContext) ast.Node {
 	return &ast.TODO{}
 }
 
-func (c *cc) convertAtomExpr(n *parser.Atom_exprContext) ast.Node {
+func (c *cc) VisitAtom_expr(ctx *parser.Atom_exprContext) interface{} {
 	switch {
-	case n.An_id_or_type() != nil && n.NAMESPACE() != nil:
-		return NewIdentifier(parseAnIdOrType(n.An_id_or_type()) + "::" + parseIdOrType(n.Id_or_type()))
-	case n.An_id_or_type() != nil:
-		return NewIdentifier(parseAnIdOrType(n.An_id_or_type()))
-	case n.Literal_value() != nil:
-		return c.convertLiteralValue(n.Literal_value().(*parser.Literal_valueContext))
-	case n.Bind_parameter() != nil:
-		return c.convertBindParameter(n.Bind_parameter().(*parser.Bind_parameterContext))
+	case ctx.An_id_or_type() != nil && ctx.NAMESPACE() != nil:
+		return NewIdentifier(parseAnIdOrType(ctx.An_id_or_type()) + "::" + parseIdOrType(ctx.Id_or_type()))
+	case ctx.An_id_or_type() != nil:
+		return NewIdentifier(parseAnIdOrType(ctx.An_id_or_type()))
+	case ctx.Literal_value() != nil:
+		return ctx.Literal_value().Accept(c)
+	case ctx.Bind_parameter() != nil:
+		return ctx.Bind_parameter().Accept(c).(ast.Node)
 	default:
 		return &ast.TODO{}
 	}
 }
 
-func (c *cc) convertLiteralValue(n *parser.Literal_valueContext) ast.Node {
+func (c *cc) VisitLiteral_value(ctx *parser.Literal_valueContext) interface{} {
 	switch {
-	case n.Integer() != nil:
-		text := n.Integer().GetText()
+	case ctx.Integer() != nil:
+		text := ctx.Integer().GetText()
 		val, err := parseIntegerValue(text)
 		if err != nil {
 			if debug.Active {
@@ -2372,52 +2494,52 @@ func (c *cc) convertLiteralValue(n *parser.Literal_valueContext) ast.Node {
 			}
 			return &ast.TODO{}
 		}
-		return &ast.A_Const{Val: &ast.Integer{Ival: val}, Location: c.pos(n.GetStart())}
+		return &ast.A_Const{Val: &ast.Integer{Ival: val}, Location: c.pos(ctx.GetStart())}
 
-	case n.Real_() != nil:
-		text := n.Real_().GetText()
-		return &ast.A_Const{Val: &ast.Float{Str: text}, Location: c.pos(n.GetStart())}
+	case ctx.Real_() != nil:
+		text := ctx.Real_().GetText()
+		return &ast.A_Const{Val: &ast.Float{Str: text}, Location: c.pos(ctx.GetStart())}
 
-	case n.STRING_VALUE() != nil: // !!! debug !!! (problem with quoted strings)
-		val := n.STRING_VALUE().GetText()
+	case ctx.STRING_VALUE() != nil: // !!! debug !!! (problem with quoted strings)
+		val := ctx.STRING_VALUE().GetText()
 		if len(val) >= 2 {
 			val = val[1 : len(val)-1]
 		}
-		return &ast.A_Const{Val: &ast.String{Str: val}, Location: c.pos(n.GetStart())}
+		return &ast.A_Const{Val: &ast.String{Str: val}, Location: c.pos(ctx.GetStart())}
 
-	case n.Bool_value() != nil:
+	case ctx.Bool_value() != nil:
 		var i bool
-		if n.Bool_value().TRUE() != nil {
+		if ctx.Bool_value().TRUE() != nil {
 			i = true
 		}
-		return &ast.A_Const{Val: &ast.Boolean{Boolval: i}, Location: c.pos(n.GetStart())}
+		return &ast.A_Const{Val: &ast.Boolean{Boolval: i}, Location: c.pos(ctx.GetStart())}
 
-	case n.NULL() != nil:
+	case ctx.NULL() != nil:
 		return &ast.Null{}
 
-	case n.CURRENT_TIME() != nil:
+	case ctx.CURRENT_TIME() != nil:
 		if debug.Active {
 			log.Printf("TODO: Implement CURRENT_TIME")
 		}
 		return &ast.TODO{}
 
-	case n.CURRENT_DATE() != nil:
+	case ctx.CURRENT_DATE() != nil:
 		if debug.Active {
 			log.Printf("TODO: Implement CURRENT_DATE")
 		}
 		return &ast.TODO{}
 
-	case n.CURRENT_TIMESTAMP() != nil:
+	case ctx.CURRENT_TIMESTAMP() != nil:
 		if debug.Active {
 			log.Printf("TODO: Implement CURRENT_TIMESTAMP")
 		}
 		return &ast.TODO{}
 
-	case n.BLOB() != nil:
-		blobText := n.BLOB().GetText()
-		return &ast.A_Const{Val: &ast.String{Str: blobText}, Location: c.pos(n.GetStart())}
+	case ctx.BLOB() != nil:
+		blobText := ctx.BLOB().GetText()
+		return &ast.A_Const{Val: &ast.String{Str: blobText}, Location: c.pos(ctx.GetStart())}
 
-	case n.EMPTY_ACTION() != nil:
+	case ctx.EMPTY_ACTION() != nil:
 		if debug.Active {
 			log.Printf("TODO: Implement EMPTY_ACTION")
 		}
@@ -2425,177 +2547,20 @@ func (c *cc) convertLiteralValue(n *parser.Literal_valueContext) ast.Node {
 
 	default:
 		if debug.Active {
-			log.Printf("Unknown literal value type: %T", n)
+			log.Printf("Unknown literal value type: %T", ctx)
 		}
 		return &ast.TODO{}
 	}
 }
 
-func (c *cc) convertSqlStmt(n *parser.Sql_stmtContext) ast.Node {
-	if n == nil {
+func (c *cc) VisitSql_stmt(ctx *parser.Sql_stmtContext) interface{} {
+	if ctx == nil {
 		return nil
 	}
 	// todo: handle explain
-	if core := n.Sql_stmt_core(); core != nil {
-		return c.convert(core)
+	if core := ctx.Sql_stmt_core(); core != nil {
+		return core.Accept(c)
 	}
 
 	return nil
-}
-
-func (c *cc) convert(node node) ast.Node {
-	switch n := node.(type) {
-	case *parser.Sql_stmtContext:
-		return c.convertSqlStmt(n)
-
-	case *parser.Sql_stmt_coreContext:
-		return c.convertSqlStmtCore(n)
-
-	case *parser.Create_table_stmtContext:
-		return c.convertCreate_table_stmtContext(n)
-
-	case *parser.Select_stmtContext:
-		return c.convertSelectStmtContext(n)
-
-	case *parser.Select_coreContext:
-		return c.convertSelectCoreContext(n)
-
-	case *parser.Result_columnContext:
-		return c.convertResultColumn(n)
-
-	case *parser.Join_sourceContext:
-		return c.convertJoinSource(n)
-
-	case *parser.Flatten_sourceContext:
-		return c.convertFlattenSource(n)
-
-	case *parser.Named_single_sourceContext:
-		return c.convertNamedSingleSource(n)
-
-	case *parser.Single_sourceContext:
-		return c.convertSingleSource(n)
-
-	case *parser.Bind_parameterContext:
-		return c.convertBindParameter(n)
-
-	case *parser.ExprContext:
-		return c.convertExpr(n)
-
-	case *parser.Or_subexprContext:
-		return c.convertOrSubExpr(n)
-
-	case *parser.And_subexprContext:
-		return c.convertAndSubexpr(n)
-
-	case *parser.Xor_subexprContext:
-		return c.convertXorSubexpr(n)
-
-	case *parser.Eq_subexprContext:
-		return c.convertEqSubexpr(n)
-
-	case *parser.Neq_subexprContext:
-		return c.convertNeqSubexpr(n)
-
-	case *parser.Bit_subexprContext:
-		return c.convertBitSubexpr(n)
-
-	case *parser.Add_subexprContext:
-		return c.convertAddSubexpr(n)
-
-	case *parser.Mul_subexprContext:
-		return c.convertMulSubexpr(n)
-
-	case *parser.Con_subexprContext:
-		return c.convertConSubexpr(n)
-
-	case *parser.Unary_subexprContext:
-		return c.convertUnarySubexpr(n)
-
-	case *parser.Unary_casual_subexprContext:
-		return c.convertUnaryCasualSubexpr(n)
-
-	case *parser.Id_exprContext:
-		return c.convertIdExpr(n)
-
-	case *parser.Atom_exprContext:
-		return c.convertAtomExpr(n)
-
-	case *parser.Literal_valueContext:
-		return c.convertLiteralValue(n)
-
-	case *parser.Json_api_exprContext:
-		return c.convertJsonApiExpr(n)
-
-	case *parser.Type_name_compositeContext:
-		return c.convertTypeNameComposite(n)
-
-	case *parser.Type_nameContext:
-		return c.convertTypeName(n)
-
-	case *parser.Integer_or_bindContext:
-		return c.convertIntegerOrBind(n)
-
-	case *parser.Type_name_or_bindContext:
-		return c.convertTypeNameOrBind(n)
-
-	case *parser.Into_table_stmtContext:
-		return c.convertInto_table_stmtContext(n)
-
-	case *parser.Values_stmtContext:
-		return c.convertValues_stmtContext(n)
-
-	case *parser.Returning_columns_listContext:
-		return c.convertReturning_columns_listContext(n)
-
-	case *parser.Delete_stmtContext:
-		return c.convertDelete_stmtContext(n)
-
-	case *parser.Update_stmtContext:
-		return c.convertUpdate_stmtContext(n)
-
-	case *parser.Drop_table_stmtContext:
-		return c.convertDrop_table_stmtContext(n)
-
-	case *parser.Commit_stmtContext:
-		return c.convertCommit_stmtContext(n)
-
-	case *parser.Rollback_stmtContext:
-		return c.convertRollback_stmtContext(n)
-
-	case *parser.Pragma_valueContext:
-		return c.convertPragma_valueContext(n)
-
-	case *parser.Pragma_stmtContext:
-		return c.convertPragma_stmtContext(n)
-
-	case *parser.Use_stmtContext:
-		return c.convertUse_stmtContext(n)
-
-	case *parser.Cluster_exprContext:
-		return c.convertCluster_exprContext(n)
-
-	case *parser.Create_user_stmtContext:
-		return c.convertCreate_user_stmtContext(n)
-
-	case *parser.Role_nameContext:
-		return c.convertRole_nameContext(n)
-
-	case *parser.User_optionContext:
-		return c.convertUser_optionContext(n)
-
-	case *parser.Create_group_stmtContext:
-		return c.convertCreate_group_stmtContext(n)
-
-	case *parser.Alter_user_stmtContext:
-		return c.convertAlter_user_stmtContext(n)
-
-	case *parser.Alter_group_stmtContext:
-		return c.convertAlter_group_stmtContext(n)
-
-	case *parser.Drop_role_stmtContext:
-		return c.convertDrop_role_stmtCOntext(n)
-
-	default:
-		return todo("convert(case=default)", n)
-	}
 }

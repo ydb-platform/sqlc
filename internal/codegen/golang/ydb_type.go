@@ -159,8 +159,22 @@ func YDBType(req *plugin.GenerateRequest, options *opts.Options, col *plugin.Col
 		return "interface{}"
 
 	default:
+		// Handle special cases for sqlc default types that don't exist in YDB
+		if columnType == "integer" {
+			// sqlc uses "integer" as default type for numeric parameters
+			// This includes LIMIT/OFFSET parameters and other numeric literals
+			// In YDB context, these should be uint64
+			if notNull {
+				return "uint64"
+			}
+			if emitPointersForNull {
+				return "*uint64"
+			}
+			return "*uint64"
+		}
+
 		if debug.Active {
-			log.Printf("unknown YDB type: %s\n", columnType)
+			log.Printf("unknown YDB type: %s (column: %s)\n", columnType, col.Name)
 		}
 
 		return "interface{}"

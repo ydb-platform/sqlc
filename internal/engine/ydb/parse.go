@@ -64,13 +64,17 @@ func (p *Parser) Parse(r io.Reader) ([]ast.Statement, error) {
 		loc := 0
 		for _, stmt := range stmtListCtx.AllSql_stmt() {
 			converter := &cc{content: string(blob)}
-			out := converter.convert(stmt)
-			if _, ok := out.(*ast.TODO); ok {
-				loc = byteOffset(content, stmt.GetStop().GetStop() + 2)
+			result := stmt.Accept(converter)
+			if result == nil {
+				loc = byteOffset(content, stmt.GetStop().GetStop()+2)
 				continue
 			}
-			if out != nil {
-				len := byteOffset(content, stmt.GetStop().GetStop() + 1) - loc
+			if out, ok := result.(ast.Node); ok {
+				if _, isTODO := out.(*ast.TODO); isTODO {
+					loc = byteOffset(content, stmt.GetStop().GetStop()+2)
+					continue
+				}
+				len := byteOffset(content, stmt.GetStop().GetStop()+1) - loc
 				stmts = append(stmts, ast.Statement{
 					Raw: &ast.RawStmt{
 						Stmt:         out,
@@ -78,7 +82,7 @@ func (p *Parser) Parse(r io.Reader) ([]ast.Statement, error) {
 						StmtLen:      len,
 					},
 				})
-				loc = byteOffset(content, stmt.GetStop().GetStop() + 2)
+				loc = byteOffset(content, stmt.GetStop().GetStop()+2)
 			}
 		}
 	}
