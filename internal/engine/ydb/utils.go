@@ -159,8 +159,7 @@ func (c *cc) extractRoleSpec(n parser.IRole_nameContext, roletype ast.RoleSpecTy
 	if n == nil {
 		return nil, false, nil
 	}
-	temp := n.Accept(c)
-	var roleNode, ok = temp.(ast.Node)
+	roleNode, ok := n.Accept(c).(ast.Node)
 	if !ok {
 		return nil, false, nil
 	}
