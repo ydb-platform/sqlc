@@ -25,7 +25,7 @@ require (
 	github.com/wasilibs/go-pgquery v0.0.0-20250409022910-10ac41983c07
 	github.com/xeipuuv/gojsonschema v1.2.0
 	github.com/ydb-platform/ydb-go-sdk/v3 v3.115.3
-	github.com/ydb-platform/yql-parsers v0.0.0-20250309001738-7d693911f333
+	github.com/ydb-platform/yql-parsers v0.0.0-20250911122629-e8a65d734cbd
 	golang.org/x/sync v0.16.0
 	google.golang.org/grpc v1.75.0
 	google.golang.org/protobuf v1.36.8
