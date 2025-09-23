@@ -1828,7 +1828,6 @@ func (c *cc) VisitType_name(n *parser.Type_nameContext) interface{} {
 		}
 	}
 
-	// Handle simple types
 	if simple := n.Type_name_simple(); simple != nil {
 		return &ast.TypeName{
 			Name:    simple.GetText(),
