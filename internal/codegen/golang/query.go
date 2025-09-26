@@ -297,7 +297,6 @@ func (v QueryValue) YDBParamMapEntries() string {
 
 // ydbBuilderMethodForColumnType maps a YDB column data type to a ParamsBuilder method name.
 func ydbBuilderMethodForColumnType(dbType string) string {
-	// Extract base type from Optional<T> types
 	baseType := extractBaseType(strings.ToLower(dbType))
 
 	switch baseType {

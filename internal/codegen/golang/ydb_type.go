@@ -188,6 +188,7 @@ func YDBType(req *plugin.GenerateRequest, options *opts.Options, col *plugin.Col
 
 }
 
+// This function extracts the base type from optional types
 func extractBaseType(typeStr string) string {
 	if strings.HasPrefix(typeStr, "optional<") && strings.HasSuffix(typeStr, ">") {
 		return strings.TrimSuffix(strings.TrimPrefix(typeStr, "optional<"), ">")
