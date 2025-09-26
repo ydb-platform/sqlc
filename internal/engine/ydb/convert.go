@@ -2842,7 +2842,6 @@ func (c *cc) handleInvokeSuffix(base ast.Node, invokeCtx *parser.Invoke_exprCont
 						Location: baseNode.Location,
 					}
 				}
-				
 				if funcName == "least" || funcName == "min_of" {
 					return &ast.MinMaxExpr{
 						Op:       ast.MinMaxOp(2),
