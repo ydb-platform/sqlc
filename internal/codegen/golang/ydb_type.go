@@ -49,7 +49,7 @@ func YDBType(req *plugin.GenerateRequest, options *opts.Options, col *plugin.Col
 		}
 		// return "sql.NullInt16"
 		return "*int16"
-	case "int", "int32": //ydb doesn't have int type, but we need it to support untyped constants 
+	case "int", "int32": //ydb doesn't have int type, but we need it to support untyped constants
 		if notNull {
 			return "int32"
 		}
@@ -159,7 +159,7 @@ func YDBType(req *plugin.GenerateRequest, options *opts.Options, col *plugin.Col
 			return "*string"
 		}
 		return "*string"
-		
+
 	case "date", "date32", "datetime", "timestamp", "tzdate", "tztimestamp", "tzdatetime":
 		if notNull {
 			return "time.Time"
@@ -168,6 +168,24 @@ func YDBType(req *plugin.GenerateRequest, options *opts.Options, col *plugin.Col
 			return "*time.Time"
 		}
 		return "*time.Time"
+
+	case "uuid":
+		if notNull {
+			return "uuid.UUID"
+		}
+		if emitPointersForNull {
+			return "*uuid.UUID"
+		}
+		return "*uuid.UUID"
+
+	case "yson":
+		if notNull {
+			return "[]byte"
+		}
+		if emitPointersForNull {
+			return "*[]byte"
+		}
+		return "*[]byte"
 
 	case "null":
 		// return "sql.Null"
